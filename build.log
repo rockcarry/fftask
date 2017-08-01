@@ -1,0 +1,10 @@
+Invalid keyboard code specified
+Turbo C  Version 2.01  Copyright (c) 1987, 1988 Borland International
+test.c:
+fftask.c:
+Warning fftask.c 375: Parameter 'htask' is never used in function task_join
+Warning fftask.c 376: Parameter 'ms' is never used in function task_sleep
+Warning fftask.c 377: Parameter 'code' is never used in function task_exit
+Turbo Link  Version 2.0  Copyright (c) 1987, 1988 Borland International
+
+        Available memory 363660
