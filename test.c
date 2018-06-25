@@ -72,10 +72,11 @@ void main(void)
     void *htask4    = NULL;
     int   exitcode1 = 0;
     int   exitcode2 = 0;
-    int   p1 = 1;
-    int   p2 = 2;
-    int   p3 = 3;
-    float p4 = 0;
+    int   p1   = 1;
+    int   p2   = 2;
+    int   p3   = 3;
+    float p4   = 0;
+    int   stop = 0;
 
     /* 初始化多任务系统 */
     ffkernel_init();
@@ -87,22 +88,32 @@ void main(void)
     htask3 = task_create(task3, &p3, 0);
     htask4 = task_create(task4, &p4, 0);
 
-    while (1) {
+    while (!stop) {
         mutex_lock(g_dos_mutex, -1);
-        if (kbhit()) break;
+        stop = kbhit();
         printf("p1 = %d, p2 = %d, p3 = %d, p4 = %.1f\r\n", p1, p2, p3, p4);
         printf("g_tick_counter = %ld, g_idle_counter = %ld\r\n", g_tick_counter, g_idle_counter);
         mutex_unlock(g_dos_mutex);
-        task_sleep(1000);
+        if (!stop) task_sleep(1000);
     }
+
+    mutex_lock(g_dos_mutex, -1);
+    printf("please wait task1 and task2 done.\r\n");
+    printf("please wait task1 and task2 done.\r\n");
+    printf("please wait task1 and task2 done.\r\n");
+    mutex_unlock(g_dos_mutex);
 
     task_wait(htask1, -1);
     task_exitcode(htask1, &exitcode1);
+    mutex_lock(g_dos_mutex, -1);
     printf("wait htask1 done, exitcode = %u.\r\n", exitcode1);
+    mutex_unlock(g_dos_mutex);
 
     task_wait(htask2, -1);
     task_exitcode(htask2, &exitcode2);
+    mutex_lock(g_dos_mutex, -1);
     printf("wait htask2 done, exitcode = %u.\r\n", exitcode2);
+    mutex_unlock(g_dos_mutex);
 
     task_destroy(htask1);
     task_destroy(htask2);
