@@ -26,10 +26,7 @@
     struct tagTASKCTRLBLK *o_prev; \
     struct tagTASKCTRLBLK *w_head; \
     struct tagTASKCTRLBLK *w_tail; \
-    int    o_type;  \
-    int    o_data0; \
-    int    o_data1; \
-    void  *o_owner;
+    int    o_type;
 
 /* 默认任务堆栈大小 */
 #define TASK_STACK_SIZE  1024
@@ -47,6 +44,9 @@ typedef struct tagTASKCTRLBLK {
 
 typedef struct tagKERNELOBJ {
     KOBJ_COMMON_MEMBERS
+    int   o_data0;
+    int   o_data1;
+    void *o_owner;
 } KERNELOBJ;
 
 /* 内部全局变量定义 */
