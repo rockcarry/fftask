@@ -1,11 +1,6 @@
 #ifndef __FFTASK_H__
 #define __FFTASK_H__
 
-/* 常量定义 */
-#define FEVENT_INITSET   (1 << 3)
-#define FEVENT_AUTORESET (1 << 4)
-#define FEVENT_WAKESALL  (1 << 5)
-
 /* 任务函数类型定义 */
 typedef int far (*TASK)(void far *p);
 
@@ -31,16 +26,23 @@ int   mutex_destroy(void *hmutex);
 int   mutex_lock   (void *hmutex, int timeout);
 int   mutex_unlock (void *hmutex);
 
-void* event_create (int flags);
-int   event_destroy(void *hevent);
-int   event_wait   (void *hevent, int  timeout);
-int   event_setval (void *hevent, int  value);
-int   event_getval (void *hevent, int *value);
-
-void* sem_create   (int value);
+void* sem_create   (int initval, int maxval);
 int   sem_destroy  (void *hsem);
 int   sem_wait     (void *hsem, int timeout);
 int   sem_post     (void *hsem);
+int   sem_getval   (void *hsem, int *value);
+
+/*
++------+
+| 说明 |
++------+
+ 所有接口 int 型返回值，0 表示成功，-1 表示非法参数，-2 有特殊含义
+ 返回值如果为 -2，含义如下：
+ task_suspend  - 任务已经运行结束
+ task_resume   - 任务已经运行结束
+ task_exitcode - 任务还没有结束运行
+ mutex_unlock  - 当前任务不是 mutex 的所有者
+ */
 
 #endif
 

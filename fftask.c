@@ -16,22 +16,20 @@
 
 #define KOBJ_TYPE_TASK     0
 #define KOBJ_TYPE_MUTEX    1
-#define KOBJ_TYPE_EVENT    2
-#define KOBJ_TYPE_SEM      3
+#define KOBJ_TYPE_SEM      2
+#define KOBJ_TYPE_EVENT    3
 #define KOBJ_TYPE_MASK     0x7
-
-#define KOBJ_TASK_DONE       (1 << 3)
-#define KOBJ_EVENT_VALUE     (1 << 3)
-#define KOBJ_EVENT_AUTORESET (1 << 4)
-#define KOBJ_EVENT_WAKESALL  (1 << 5)
+#define KOBJ_TASK_DONE    (1 << 3)
 
 #define KOBJ_COMMON_MEMBERS \
     struct tagTASKCTRLBLK *o_next; \
     struct tagTASKCTRLBLK *o_prev; \
     struct tagTASKCTRLBLK *w_head; \
     struct tagTASKCTRLBLK *w_tail; \
-    int    o_type; \
-    int    o_data;
+    int    o_type;  \
+    int    o_data0; \
+    int    o_data1; \
+    void  *o_owner;
 
 /* 默认任务堆栈大小 */
 #define TASK_STACK_SIZE  1024
@@ -126,17 +124,6 @@ static void waitenqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
         kobj->w_head = ptask;
     }
 }
-
-static void makeallwaitready(KERNELOBJ *kobj)
-{
-    if (kobj->w_head) {
-        kobj->w_tail->o_next =  ready_list_head.o_next;
-        ready_list_head.o_next->o_prev = kobj->w_tail;
-        ready_list_head.o_next = kobj->w_head;
-        kobj->w_head->o_prev = &ready_list_head;
-        kobj->w_head = kobj->w_tail = NULL;
-    }
-}
 /* -- 任务队列管理函数 -- */
 
 /* 处理休眠队列 */
@@ -174,8 +161,8 @@ static void interrupt new_int_1ch(void)
     g_tick_counter++;
 
     /* 当前运行的任务放入就绪队列尾部 */
-    g_prevtask = g_running_task;
     readyenqueue(g_running_task);
+    g_prevtask = g_running_task;
 
     /* 处理休眠队列 */
     handle_sleep_task();
@@ -228,7 +215,11 @@ static void far task_done_handler(TASKCTRLBLK far *ptask)
 
     /* 将所有等待 ptask 的任务放入就绪队列头 */
     if (ptask->w_head) {
-        makeallwaitready((KERNELOBJ*)ptask);
+        ptask->w_tail->o_next =  ready_list_head.o_next;
+        ready_list_head.o_next->o_prev = ptask->w_tail;
+        ready_list_head.o_next = ptask->w_head;
+        ptask->w_head->o_prev = &ready_list_head;
+        ptask->w_head = ptask->w_tail = NULL;
     }
 
     /* 取出就绪任务 */
@@ -428,7 +419,7 @@ int task_suspend(void *htask)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务已经运行结束 */
-    if (ptask->o_type & KOBJ_TASK_DONE) return -1;
+    if (ptask->o_type & KOBJ_TASK_DONE) return -2;
 
     /* 关中断 */
     INTERRUPT_OFF();
@@ -456,7 +447,7 @@ int task_resume(void *htask)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务已经运行结束 */
-    if (ptask->o_type & KOBJ_TASK_DONE) return -1;
+    if (ptask->o_type & KOBJ_TASK_DONE) return -2;
 
     /* 关中断 */
     INTERRUPT_OFF();
@@ -464,8 +455,8 @@ int task_resume(void *htask)
     /* 如果欲恢复的任务不在当前运行状态 */
     if (g_running_task != ptask) {
         /* 将当前运行任务放入就绪队列尾 */
+        readyenqueue(g_running_task);
         g_prevtask = g_running_task;
-        readyenqueue(g_prevtask);
 
         /* ptch 作为当前任务 */
         g_nexttask = ptask;
@@ -534,7 +525,7 @@ int task_exitcode(void *htask, int *code)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务未运行结束 */
-    if ((ptask->o_type & KOBJ_TASK_DONE) == 0) return -1;
+    if ((ptask->o_type & KOBJ_TASK_DONE) == 0) return -2;
 
     /* 返回结束码 */
     if (code) *code = ptask->t_retv;
@@ -552,7 +543,8 @@ void* mutex_create(void)
     if (!pmutex) return 0;
 
     /* 初始化互斥体 */
-    pmutex->o_type = KOBJ_TYPE_MUTEX;
+    pmutex->o_type  = KOBJ_TYPE_MUTEX;
+    pmutex->o_data0 = 1;
     return pmutex;
 }
 
@@ -562,7 +554,7 @@ int mutex_destroy(void *hmutex)
     KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
 
     /* 参数有效性检查 */
-    if (!pmutex || pmutex->o_type != KOBJ_TYPE_MUTEX) return -1;
+    if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
     /* 释放互斥体件缓冲区 */
     if (pmutex) free(pmutex);
@@ -574,13 +566,15 @@ int mutex_lock(void *hmutex, int timeout)
     KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
 
     /* 参数有效性检查 */
-    if (!pmutex || pmutex->o_type != KOBJ_TYPE_MUTEX) return -1;
+    if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
     /* 关中断 */
     INTERRUPT_OFF();
 
     /* 互斥体加锁 */
-    if (pmutex->o_data++ == 0) {
+    if (pmutex->o_data0 > 0) {
+        pmutex->o_data0--;
+        pmutex->o_owner = g_running_task;
         INTERRUPT_ON();
         return 0;
     }
@@ -594,6 +588,10 @@ int mutex_lock(void *hmutex, int timeout)
 
     /* 进行任务切换 */
     switch_task();
+
+    INTERRUPT_OFF();
+    pmutex->o_owner = g_running_task;
+    INTERRUPT_ON();
     return 0;
 }
 
@@ -602,23 +600,29 @@ int mutex_unlock(void *hmutex)
     KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
 
     /* 参数有效性检查 */
-    if (!pmutex || pmutex->o_type != KOBJ_TYPE_MUTEX) return -1;
+    if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
     /* 关中断 */
     INTERRUPT_OFF();
 
-    /* 互斥体解锁 */
-    if (pmutex->o_data > 0) pmutex->o_data--;
+    /* 当前任务不是 mutex 的所有者 */
+    if (pmutex->o_owner != g_running_task) {
+        INTERRUPT_ON();
+        return -2;
+    }
 
     /* 如果没有任务等待该互斥体则返回 */
     if (!pmutex->w_head) {
+        if (pmutex->o_data0 < 1) {
+            pmutex->o_data0++;
+        }
         INTERRUPT_ON();
         return 0;
     }
 
     /* 将当前运行任务放入就绪队列尾 */
-    g_prevtask = g_running_task;
     readyenqueue(g_running_task);
+    g_prevtask = g_running_task;
 
     /* 将第一个等待 pmutex 的任务取出 */
     g_nexttask = waitdequeue(pmutex);
@@ -628,49 +632,51 @@ int mutex_unlock(void *hmutex)
     return 0;
 }
 
-void* event_create(int flags)
+void* sem_create(int initval, int maxval)
 {
-    KERNELOBJ *pevent;
+    KERNELOBJ *psem;
 
     /* 为 event 分配缓冲区 */
-    pevent = calloc(1, sizeof(KERNELOBJ));
-    if (!pevent) return 0;
+    psem = calloc(1, sizeof(KERNELOBJ));
+    if (!psem) return 0;
 
     /* 初始化 event */
-    pevent->o_type = KOBJ_TYPE_EVENT | (flags & 0xf8);
-    return pevent;
+    psem->o_type  = KOBJ_TYPE_SEM;
+    psem->o_data0 = initval;
+    psem->o_data1 = maxval ;
+    return psem;
 }
 
-int event_destroy(void *hevent)
+int sem_destroy(void *hsem)
 {
-    KERNELOBJ *pevent = (KERNELOBJ*)hevent;
+    KERNELOBJ *psem = (KERNELOBJ*)hsem;
 
     /* 参数有效性检查 */
-    if (!pevent || pevent->o_type != KOBJ_TYPE_EVENT) return -1;
+    if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
     /* 释放互斥体件缓冲区 */
-    if (pevent) free(pevent);
+    if (psem) free(psem);
 }
 
-int event_wait(void *hevent, int timeout)
+int sem_wait(void *hsem, int timeout)
 {
-    KERNELOBJ *pevent = (KERNELOBJ*)hevent;
+    KERNELOBJ *psem = (KERNELOBJ*)hsem;
 
     /* 参数有效性检查 */
-    if (!pevent || pevent->o_type != KOBJ_TYPE_EVENT) return -1;
+    if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
     /* 关中断 */
     INTERRUPT_OFF();
-    if (pevent->o_type & KOBJ_EVENT_VALUE) {
-        if (pevent->o_type & KOBJ_EVENT_AUTORESET) {
-            pevent->o_type &= ~KOBJ_EVENT_VALUE;
-        }
+
+    /* 如果信号量大于零 */
+    if (psem->o_data0 > 0) {
+        psem->o_data0--;
         INTERRUPT_ON();
         return 0;
     }
 
-    /* 将当前任务放入 pevent 的等待队列尾 */
-    waitenqueue(pevent, g_running_task, timeout);
+    /* 将当前任务放入 psem 的等待队列尾 */
+    waitenqueue(psem, g_running_task, timeout);
 
     /* 取出就绪任务 */
     g_prevtask = g_running_task;
@@ -678,27 +684,23 @@ int event_wait(void *hevent, int timeout)
 
     /* 进行任务切换 */
     switch_task();
-
-    if (pevent->o_type & KOBJ_EVENT_AUTORESET) {
-        pevent->o_type &= ~KOBJ_EVENT_VALUE;
-    }
 }
 
-int event_setval(void *hevent, int value)
+int sem_post(void *hsem)
 {
-    KERNELOBJ *pevent = (KERNELOBJ*)hevent;
+    KERNELOBJ *psem = (KERNELOBJ*)hsem;
 
     /* 参数有效性检查 */
-    if (!pevent || pevent->o_type != KOBJ_TYPE_EVENT) return -1;
+    if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
     /* 关中断 */
     INTERRUPT_OFF();
 
-    pevent->o_type &= ~KOBJ_EVENT_VALUE;
-    pevent->o_type |=  value ? KOBJ_EVENT_VALUE : 0;
-
     /* 如果没有任务等待该互斥体则返回 */
-    if (!value || !pevent->w_head) {
+    if (!psem->w_head) {
+        if (psem->o_data0 < psem->o_data1) {
+            psem->o_data0++;
+        }
         INTERRUPT_ON();
         return 0;
     }
@@ -706,30 +708,22 @@ int event_setval(void *hevent, int value)
     /* 将当前运行任务放入就绪队列尾 */
     readyenqueue(g_running_task);
     g_prevtask = g_running_task;
-
-    if (pevent->o_type & KOBJ_EVENT_WAKESALL) {
-        /* 将所有等待 pevent 的任务放入就绪队列头 */
-        makeallwaitready(pevent);
-        g_nexttask = readydequeue(); /* 再从就绪队列取出任务 */
-    } else {
-        /* 将第一个等待 pevent 的任务取出 */
-        g_nexttask = waitdequeue(pevent);
-    }
+    g_nexttask = waitdequeue(psem); /* 将第一个等待 psem 的任务取出 */
 
     /* 进行任务切换 */
     switch_task();
     return 0;
 }
 
-int event_getval(void *hevent, int *value)
+int sem_getval(void *hsem, int *value)
 {
-    KERNELOBJ *pevent = (KERNELOBJ*)hevent;
+    KERNELOBJ *psem = (KERNELOBJ*)hsem;
 
     /* 参数有效性检查 */
-    if (!pevent || pevent->o_type != KOBJ_TYPE_EVENT) return -1;
+    if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
-    /* 返回 event 值 */
-    *value = (pevent->o_type & KOBJ_EVENT_VALUE) ? 1 : 0;
+    /* 返回 sem 值 */
+    *value = psem->o_data1;
     return 0;
 }
 
