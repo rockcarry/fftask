@@ -57,10 +57,11 @@ static TASKCTRLBLK  ready_list_head = {0};  /* 任务就绪队列头 */
 static TASKCTRLBLK  ready_list_tail = {0};  /* 任务就绪队列尾 */
 static TASKCTRLBLK  sleep_list_head = {0};  /* 任务休眠队列头 */
 static TASKCTRLBLK  sleep_list_tail = {0};  /* 任务休眠队列尾 */
+static KERNELOBJ    kobj_list_head  = {0};  /*  */
 static TASKCTRLBLK *g_running_task  = NULL; /* 当前运行的任务 */
 static TASKCTRLBLK *g_prevtask      = NULL; /* 任务切换的前一个任务 */
 static TASKCTRLBLK *g_nexttask      = NULL; /* 任务切换的下一个任务 */
-static TASKCTRLBLK *g_idletask      = NULL; /* 指向空闲任务控制块 */
+static char         g_idletask[256];        /* 空闲任务控制块 */
 
 unsigned long g_tick_counter = 1;  /* 该变量用于记录系统 tick 次数 */
 unsigned long g_idle_counter = 1;  /* 该变量用于记录空闲任务次数 */
@@ -70,7 +71,7 @@ unsigned long g_idle_counter = 1;  /* 该变量用于记录空闲任务次数 */
 /* 就绪队列入队 */
 static void readyenqueue(TASKCTRLBLK *ptask)
 {
-    if (ptask == g_idletask) return;
+    if (ptask == (TASKCTRLBLK*)g_idletask) return;
     ptask->o_prev =  ready_list_tail.o_prev;
     ptask->o_next = &ready_list_tail;
     ptask->o_prev->o_next = ptask;
@@ -86,7 +87,7 @@ static TASKCTRLBLK* readydequeue(void)
         ptask->o_next->o_prev = ptask->o_prev;
         return ptask;
     } else {
-        return g_idletask;
+        return (TASKCTRLBLK*)g_idletask;
     }
 }
 
@@ -176,7 +177,7 @@ static void interrupt new_int_1ch(void)
     _SS = g_nexttask->t_ss;
     _SP = g_nexttask->t_sp;
     g_running_task = g_nexttask;
-    g_idle_counter+=(g_running_task == g_idletask);
+    g_idle_counter+=(g_running_task == (TASKCTRLBLK*)g_idletask);
 
     /* 开中断 */
     INTERRUPT_ON();
@@ -248,21 +249,18 @@ static int far idle_task_proc(void far *p)
 }
 
 /* 函数实现 */
-int ffkernel_init(void)
+void ffkernel_init(void)
 {
-    int ret = -1;
-
     /* 关中断 */
     INTERRUPT_OFF();
 
-    /* 初始化任务队列 */
-    /* 就绪队列 */
+    /* 初始化就绪队列 */
     ready_list_head.o_next = &ready_list_tail;
     ready_list_head.o_prev = &ready_list_tail;
     ready_list_tail.o_next = &ready_list_head;
     ready_list_tail.o_prev = &ready_list_head;
 
-    /* 休眠队列 */
+    /* 初始化休眠队列 */
     sleep_list_head.o_next = &sleep_list_tail;
     sleep_list_head.o_prev = &sleep_list_tail;
     sleep_list_tail.o_next = &sleep_list_head;
@@ -274,12 +272,11 @@ int ffkernel_init(void)
     g_nexttask     = &maintask;
 
     /* 创建空闲任务 */
-    g_idletask = task_create(idle_task_proc, NULL, 256);
-    if (!g_idletask) goto done;
+    task_create(idle_task_proc, NULL, g_idletask, sizeof(g_idletask));
 
     /* 将空闲任务从就绪队列中删除 */
-    g_idletask->o_next->o_prev = g_idletask->o_prev;
-    g_idletask->o_prev->o_next = g_idletask->o_next;
+    ((TASKCTRLBLK*)g_idletask)->o_next->o_prev = ((TASKCTRLBLK*)g_idletask)->o_prev;
+    ((TASKCTRLBLK*)g_idletask)->o_prev->o_next = ((TASKCTRLBLK*)g_idletask)->o_next;
 
     /* 初始化 int 1ch 中断 */
     old_int_1ch = getvect(0x1c);
@@ -291,12 +288,9 @@ int ffkernel_init(void)
     outportb(0x43, 0x3c);
     outportb(0x40, (_8253_COUNTER >> 0) & 0xff);
     outportb(0x40, (_8253_COUNTER >> 8) & 0xff);
-    ret = 0;
 
-done:
     /* 开中断 */
     INTERRUPT_ON();
-    return ret;
 }
 
 void ffkernel_exit(void)
@@ -322,53 +316,48 @@ void ffkernel_exit(void)
     switch_task();
 }
 
-void* task_create(TASK task, void far *p, int size)
+int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
 {
-    TASKCTRLBLK *ptask = NULL;
+    TASKCTRLBLK *ptask = (TASKCTRLBLK*)ctask;
     int         *stack = NULL;
 
     /* 参数有效性检查 */
-    if (!task) return 0;
-    if (!size) size = TASK_STACK_SIZE;
+    if (!ctask || size < 256) return -1;
 
     /* 关中断 */
     INTERRUPT_OFF();
-
-    /* 分配任务控制块 */
-    ptask = malloc(sizeof(TASKCTRLBLK) + size);
-    if (!ptask) goto done;
 
     /* 任务控制块清零 */
     memset(ptask, 0, sizeof(TASKCTRLBLK));
 
     /* 指向任务栈顶 */
-    stack = (ptask->t_stack + size);
+    stack = (ptask->t_stack + size - sizeof(TASKCTRLBLK));
 
     /* 任务控制块地址入栈 */
     *--stack = FP_SEG(ptask);
     *--stack = FP_OFF(ptask);
 
     /* 任务参数 p 入栈 */
-    *--stack = FP_SEG(p);
-    *--stack = FP_OFF(p);
+    *--stack = FP_SEG(taskparam);
+    *--stack = FP_OFF(taskparam);
 
     /* 任务结束处理函数地址入栈 */
     *--stack = FP_SEG(task_done_handler);
     *--stack = FP_OFF(task_done_handler);
 
     /* 初始化任务堆栈 */
-    *--stack = 0x0200;       /* flag */
-    *--stack = FP_SEG(task); /* cs */
-    *--stack = FP_OFF(task); /* ip */
-    *--stack = 0;            /* ax */
-    *--stack = 0;            /* bx */
-    *--stack = 0;            /* cx */
-    *--stack = 0;            /* dx */
-    *--stack = 0;            /* es */
-    *--stack =_DS;           /* ds */
-    *--stack = 0;            /* si */
-    *--stack = 0;            /* di */
-    *--stack = 0;            /* bp */
+    *--stack = 0x0200;           /* flag */
+    *--stack = FP_SEG(taskfunc); /* cs */
+    *--stack = FP_OFF(taskfunc); /* ip */
+    *--stack = 0;                /* ax */
+    *--stack = 0;                /* bx */
+    *--stack = 0;                /* cx */
+    *--stack = 0;                /* dx */
+    *--stack = 0;                /* es */
+    *--stack =_DS;               /* ds */
+    *--stack = 0;                /* si */
+    *--stack = 0;                /* di */
+    *--stack = 0;                /* bp */
 
     /* 保存任务堆栈入口 */
     ptask->t_ss = FP_SEG(stack);
@@ -377,17 +366,14 @@ void* task_create(TASK task, void far *p, int size)
     /* 加入就绪队列 */
     readyenqueue(ptask);
 
-done:
     /* 开中断 */
     INTERRUPT_ON();
-
-    /* 返回任务句柄 */
-    return ptask;
+    return 0;
 }
 
-int task_destroy(void *htask)
+int task_destroy(void *ctask)
 {
-    TASKCTRLBLK *ptask = htask;
+    TASKCTRLBLK *ptask = ctask;
 
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
@@ -395,25 +381,22 @@ int task_destroy(void *htask)
     /* 关中断 */
     INTERRUPT_OFF();
 
-    /* 欲挂销毁任务为当前运行任务 */
-    if (g_running_task == ptask) {
-        free(htask);
+    if (g_running_task == ptask) { /* 欲销毁任务为当前运行任务 */
         g_prevtask = NULL;
         g_nexttask = readydequeue();
         switch_task();
-    } else { /* 欲挂起的任务不为当前运行任务 */
+    } else { /* 欲销毁任务不为当前运行任务 */
         if (ptask->o_next) ptask->o_next->o_prev = ptask->o_prev;
         if (ptask->o_prev) ptask->o_prev->o_next = ptask->o_next;
-        free(htask);
         INTERRUPT_ON();
     }
 
     return 0;
 }
 
-int task_suspend(void *htask)
+int task_suspend(void *ctask)
 {
-    TASKCTRLBLK *ptask = htask;
+    TASKCTRLBLK *ptask = ctask;
 
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
@@ -439,9 +422,9 @@ int task_suspend(void *htask)
     return 0;
 }
 
-int task_resume(void *htask)
+int task_resume(void *ctask)
 {
-    TASKCTRLBLK *ptask = htask;
+    TASKCTRLBLK *ptask = ctask;
 
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
@@ -492,9 +475,9 @@ int task_sleep(int ms)
     return 0;
 }
 
-int task_wait(void *htask, int timeout)
+int task_wait(void *ctask, int timeout)
 {
-    TASKCTRLBLK *ptask = (TASKCTRLBLK*)htask;
+    TASKCTRLBLK *ptask = (TASKCTRLBLK*)ctask;
 
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
@@ -517,9 +500,9 @@ int task_wait(void *htask, int timeout)
     return 0;
 }
 
-int task_exitcode(void *htask, int *code)
+int task_exitcode(void *ctask, int *code)
 {
-    TASKCTRLBLK *ptask = (TASKCTRLBLK*)htask;
+    TASKCTRLBLK *ptask = (TASKCTRLBLK*)ctask;
 
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
@@ -529,41 +512,35 @@ int task_exitcode(void *htask, int *code)
 
     /* 返回结束码 */
     if (code) *code = ptask->t_retv;
-
     return 0;
 }
 
 /* 创建互斥体 */
-void* mutex_create(void)
+int mutex_create(void *cmutex)
 {
-    KERNELOBJ *pmutex;
-
-    /* 为互斥体分配缓冲区 */
-    pmutex = calloc(1, sizeof(KERNELOBJ));
-    if (!pmutex) return 0;
+    KERNELOBJ *pmutex = (KERNELOBJ*)cmutex;
+    if (!cmutex) return -1;
 
     /* 初始化互斥体 */
     pmutex->o_type  = KOBJ_TYPE_MUTEX;
     pmutex->o_data0 = 1;
-    return pmutex;
+    return 0;
 }
 
 /* 销毁互斥体 */
-int mutex_destroy(void *hmutex)
+int mutex_destroy(void *cmutex)
 {
-    KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
+    KERNELOBJ *pmutex = (KERNELOBJ*)cmutex;
 
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
-    /* 释放互斥体件缓冲区 */
-    if (pmutex) free(pmutex);
     return 0;
 }
 
-int mutex_lock(void *hmutex, int timeout)
+int mutex_lock(void *cmutex, int timeout)
 {
-    KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
+    KERNELOBJ *pmutex = (KERNELOBJ*)cmutex;
 
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
@@ -595,9 +572,9 @@ int mutex_lock(void *hmutex, int timeout)
     return 0;
 }
 
-int mutex_unlock(void *hmutex)
+int mutex_unlock(void *cmutex)
 {
-    KERNELOBJ *pmutex = (KERNELOBJ*)hmutex;
+    KERNELOBJ *pmutex = (KERNELOBJ*)cmutex;
 
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
@@ -632,35 +609,31 @@ int mutex_unlock(void *hmutex)
     return 0;
 }
 
-void* sem_create(int initval, int maxval)
+int sem_create(void *csem, int initval, int maxval)
 {
-    KERNELOBJ *psem;
-
-    /* 为 event 分配缓冲区 */
-    psem = calloc(1, sizeof(KERNELOBJ));
-    if (!psem) return 0;
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
+    if (!csem) return -1;
 
     /* 初始化 event */
     psem->o_type  = KOBJ_TYPE_SEM;
     psem->o_data0 = initval;
     psem->o_data1 = maxval ;
-    return psem;
+    return 0;
 }
 
-int sem_destroy(void *hsem)
+int sem_destroy(void *csem)
 {
-    KERNELOBJ *psem = (KERNELOBJ*)hsem;
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
-    /* 释放互斥体件缓冲区 */
-    if (psem) free(psem);
+    return 0;
 }
 
-int sem_wait(void *hsem, int timeout)
+int sem_wait(void *csem, int timeout)
 {
-    KERNELOBJ *psem = (KERNELOBJ*)hsem;
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
@@ -686,9 +659,9 @@ int sem_wait(void *hsem, int timeout)
     switch_task();
 }
 
-int sem_post(void *hsem)
+int sem_post(void *csem)
 {
-    KERNELOBJ *psem = (KERNELOBJ*)hsem;
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
@@ -715,9 +688,9 @@ int sem_post(void *hsem)
     return 0;
 }
 
-int sem_getval(void *hsem, int *value)
+int sem_getval(void *csem, int *value)
 {
-    KERNELOBJ *psem = (KERNELOBJ*)hsem;
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;

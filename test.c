@@ -3,8 +3,11 @@
 #include <stdio.h>
 #include "fftask.h"
 
-static void *g_dos_mutex = NULL;
-static void *g_event     = NULL;
+static char g_dos_mutex[KOBJ_CTXT_SIZE];
+static char g_ctask1[1024];
+static char g_ctask2[1024];
+static char g_ctask3[1024];
+static char g_ctask4[1024];
 
 static int far task1(void far *p)
 {
@@ -66,10 +69,6 @@ static int far task4(void far *p)
 
 void main(void)
 {
-    void *htask1    = NULL;
-    void *htask2    = NULL;
-    void *htask3    = NULL;
-    void *htask4    = NULL;
     int   exitcode1 = 0;
     int   exitcode2 = 0;
     int   p1   = 1;
@@ -80,13 +79,13 @@ void main(void)
 
     /* 初始化多任务系统 */
     ffkernel_init();
-    g_dos_mutex = mutex_create();
+    mutex_create(g_dos_mutex);
 
     /* 创建任务 */
-    htask1 = task_create(task1, &p1, 0);
-    htask2 = task_create(task2, &p2, 0);
-    htask3 = task_create(task3, &p3, 0);
-    htask4 = task_create(task4, &p4, 0);
+    task_create(task1, &p1, g_ctask1, sizeof(g_ctask1));
+    task_create(task2, &p2, g_ctask2, sizeof(g_ctask2));
+    task_create(task3, &p3, g_ctask3, sizeof(g_ctask3));
+    task_create(task4, &p4, g_ctask4, sizeof(g_ctask4));
 
     while (!stop) {
         mutex_lock(g_dos_mutex, -1);
@@ -103,22 +102,22 @@ void main(void)
     printf("please wait task1 and task2 done.\r\n");
     mutex_unlock(g_dos_mutex);
 
-    task_wait(htask1, -1);
-    task_exitcode(htask1, &exitcode1);
+    task_wait(g_ctask1, -1);
+    task_exitcode(g_ctask1, &exitcode1);
     mutex_lock(g_dos_mutex, -1);
     printf("wait htask1 done, exitcode = %u.\r\n", exitcode1);
     mutex_unlock(g_dos_mutex);
 
-    task_wait(htask2, -1);
-    task_exitcode(htask2, &exitcode2);
+    task_wait(g_ctask2, -1);
+    task_exitcode(g_ctask2, &exitcode2);
     mutex_lock(g_dos_mutex, -1);
     printf("wait htask2 done, exitcode = %u.\r\n", exitcode2);
     mutex_unlock(g_dos_mutex);
 
-    task_destroy(htask1);
-    task_destroy(htask2);
-    task_destroy(htask3);
-    task_destroy(htask4);
+    task_destroy(g_ctask1);
+    task_destroy(g_ctask2);
+    task_destroy(g_ctask3);
+    task_destroy(g_ctask4);
 
     mutex_destroy(g_dos_mutex);
     ffkernel_exit();
