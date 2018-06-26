@@ -2,8 +2,13 @@
 #define __FFTASK_H__
 
 /* 常量定义 */
-#define TASK_CTXT_SIZE  22
-#define KOBJ_CTXT_SIZE  16
+#define FFTASK_SIZE  22
+#define FFKOBJ_SIZE  16
+
+#define FFTASK_DONE       -2
+#define FFTASK_NOTEXIT    -3
+#define FFMUTEX_NOTOWNER  -4
+#define FFWAIT_TIMEOUT    -5
 
 /* 任务函数类型定义 */
 typedef int far (*TASK)(void far *p);
@@ -34,21 +39,6 @@ int  sem_destroy  (void *csem);
 int  sem_wait     (void *csem, int timeout);
 int  sem_post     (void *csem);
 int  sem_getval   (void *csem, int *value);
-
-/*
-+------+
-| 说明 |
-+------+
- 所有接口 int 型返回值，0 表示成功，-1 表示非法参数，-2 有特殊含义
- 返回值如果为 -2，含义如下：
- task_suspend  - 任务已经运行结束
- task_resume   - 任务已经运行结束
- task_exitcode - 任务还没有结束运行
- mutex_unlock  - 当前任务不是 mutex 的所有者
- task_wait     - 等待超时
- mutex_lock    - 等待超时
- sem_wait      - 等待超时
- */
 
 #endif
 

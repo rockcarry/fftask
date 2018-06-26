@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "fftask.h"
 
-static char g_dos_mutex[KOBJ_CTXT_SIZE];
+static char g_dos_mutex[FFKOBJ_SIZE];
 static char g_ctask1[1024];
 static char g_ctask2[1024];
 static char g_ctask3[1024];

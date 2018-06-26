@@ -20,10 +20,11 @@
 #define KOBJ_TYPE_EVENT    3
 #define KOBJ_TYPE_MASK     0x7
 #define KOBJ_TASK_DONE    (1 << 3)
+#define KOBJ_TASK_TIMEOUT (1 << 4)
 
 #define KOBJ_COMMON_MEMBERS \
-    struct tagTASKCTRLBLK *o_next; \
-    struct tagTASKCTRLBLK *o_prev; \
+    struct tagKERNELOBJ   *o_next; \
+    struct tagKERNELOBJ   *o_prev; \
     struct tagTASKCTRLBLK *w_head; \
     struct tagTASKCTRLBLK *w_tail; \
     int    o_type;
@@ -59,8 +60,8 @@ static TASKCTRLBLK  ready_list_head = {0};  /* 任务就绪队列头 */
 static TASKCTRLBLK  ready_list_tail = {0};  /* 任务就绪队列尾 */
 static TASKCTRLBLK  sleep_list_head = {0};  /* 任务休眠队列头 */
 static TASKCTRLBLK  sleep_list_tail = {0};  /* 任务休眠队列尾 */
-static KERNELOBJ    kobj_list_head  = {0};  /* 内核对象列表头 */
-static KERNELOBJ    kobj_list_tail  = {0};  /* 内核对象列表尾 */
+static KERNELOBJ    kobjs_list_head  = {0}; /* 内核对象列表头 */
+static KERNELOBJ    kobjs_list_tail  = {0}; /* 内核对象列表尾 */
 static TASKCTRLBLK *g_running_task  = NULL; /* 当前运行的任务 */
 static TASKCTRLBLK *g_prevtask      = NULL; /* 任务切换的前一个任务 */
 static TASKCTRLBLK *g_nexttask      = NULL; /* 任务切换的下一个任务 */
@@ -72,7 +73,7 @@ unsigned long g_idle_counter = 1;  /* 该变量用于记录空闲任务次数 */
 /* 内部函数实现 */
 /* ++ 任务队列管理函数 ++ */
 /* 就绪队列入队 */
-static void readyenqueue(TASKCTRLBLK *ptask)
+static void ready_enqueue(TASKCTRLBLK *ptask)
 {
     if (ptask == (TASKCTRLBLK*)g_idletask) return;
     ptask->t_prev =  ready_list_tail.t_prev;
@@ -82,7 +83,7 @@ static void readyenqueue(TASKCTRLBLK *ptask)
 }
 
 /* 就绪队列出队 */
-static TASKCTRLBLK* readydequeue(void)
+static TASKCTRLBLK* ready_dequeue(void)
 {
     TASKCTRLBLK *ptask = ready_list_head.t_next;
     if (ptask != &ready_list_tail) {
@@ -94,28 +95,8 @@ static TASKCTRLBLK* readydequeue(void)
     }
 }
 
-/* 休眠队列入队 */
-static void sleepenqueue(TASKCTRLBLK *ptask)
-{
-    ptask->t_prev =  sleep_list_tail.t_prev;
-    ptask->t_next = &sleep_list_tail;
-    ptask->t_prev->t_next = ptask;
-    ptask->t_next->t_prev = ptask;
-}
-
-static TASKCTRLBLK* waitdequeue(KERNELOBJ *kobj)
-{
-    TASKCTRLBLK *ptask = kobj->w_head;
-    kobj->w_head = kobj->w_head->t_next;
-    if (kobj->w_head) {
-        kobj->w_head->t_prev = NULL;
-    } else {
-        kobj->w_tail = NULL;
-    }
-    return ptask;
-}
-
-static void waitenqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
+/* 等待队列入队 */
+static void wait_enqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
 {
     ptask->t_timeout = timeout;
     ptask->t_next    = NULL;
@@ -127,6 +108,37 @@ static void waitenqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
     if (kobj->w_head == NULL) {
         kobj->w_head = ptask;
     }
+}
+
+/* 等待队列出队 */
+static TASKCTRLBLK* wait_dequeue(KERNELOBJ *kobj)
+{
+    TASKCTRLBLK *ptask = kobj->w_head;
+    kobj->w_head = kobj->w_head->t_next;
+    if (kobj->w_head) {
+        kobj->w_head->t_prev = NULL;
+    } else {
+        kobj->w_tail = NULL;
+    }
+    return ptask;
+}
+
+/* 将 kobj 加入内核对象列表 */
+static void kobjs_append(KERNELOBJ *kobj)
+{
+    if (kobj == (KERNELOBJ*)g_idletask) return;
+    kobj->o_prev =  kobjs_list_tail.o_prev;
+    kobj->o_next = &kobjs_list_tail;
+    kobj->o_prev->o_next = kobj;
+    kobj->o_next->o_prev = kobj;
+}
+
+/* 将 kobj 从内核对象列表移除 */
+static void kobjs_remove(KERNELOBJ *kobj)
+{
+    if (kobj == (KERNELOBJ*)g_idletask) return;
+    kobj->o_next->o_prev = kobj->o_prev;
+    kobj->o_prev->o_next = kobj->o_next;
 }
 /* -- 任务队列管理函数 -- */
 
@@ -156,23 +168,53 @@ static void handle_sleep_task(void)
     }
 }
 
+static void handle_wait_task(void)
+{
+    KERNELOBJ *kobj = kobjs_list_head.o_next;
+
+    while (kobj != &kobjs_list_tail) {
+        TASKCTRLBLK *ptask = kobj->w_head;
+        TASKCTRLBLK *pready;
+
+        while (ptask != NULL) {
+            pready = ptask;
+            ptask  = ptask->t_next;
+
+            /* 判断休眠是否完成 */
+            if (pready->t_timeout != -1 && --pready->t_timeout == 0) {
+                /* 将 pready 从休眠队列中删除 */
+                if (pready->t_next) pready->t_next->t_prev = pready->t_prev;
+                else kobjs_list_head.w_tail = pready->t_prev;
+                if (pready->t_prev) pready->t_prev->t_next = pready->t_next;
+                else kobjs_list_head.w_head = pready->t_next;
+
+                /* 设置等待超时标记 */
+                pready->o_type |= KOBJ_TASK_TIMEOUT;
+
+                /* 将 pready 加入就绪队列 */
+                ready_enqueue(pready);
+            }
+        }
+        kobj = kobj->o_next;
+    }
+}
+
 static void interrupt new_int_1ch(void)
 {
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* system tick counter */
     g_tick_counter++;
 
     /* 当前运行的任务放入就绪队列尾部 */
-    readyenqueue(g_running_task);
+    ready_enqueue(g_running_task);
     g_prevtask = g_running_task;
 
-    /* 处理休眠队列 */
-    handle_sleep_task();
+    handle_sleep_task(); /* 处理休眠任务 */
+    handle_wait_task (); /* 处理等待任务 */
 
     /* 取出就绪任务 */
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     g_prevtask->t_ss = _SS;
@@ -182,16 +224,13 @@ static void interrupt new_int_1ch(void)
     g_running_task = g_nexttask;
     g_idle_counter+=(g_running_task == (TASKCTRLBLK*)g_idletask);
 
-    /* 开中断 */
-    INTERRUPT_ON();
-
     /* 清除中断屏蔽 */
     outp(0x20, 0x20);
+    INTERRUPT_ON();
 }
 
 static void interrupt switch_task(void)
 {
-    /* 进行任务切换 */
     if (g_prevtask) {
         g_prevtask->t_ss = _SS;
         g_prevtask->t_sp = _SP;
@@ -201,14 +240,12 @@ static void interrupt switch_task(void)
         _SP = g_nexttask->t_sp;
         g_running_task = g_nexttask;
     }
-    /* 开中断 */
     INTERRUPT_ON();
 }
 
 /* 任务运行结束的处理函数 */
 static void far task_done_handler(TASKCTRLBLK far *ptask)
 {
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 保存任务返回值 */
@@ -228,7 +265,7 @@ static void far task_done_handler(TASKCTRLBLK far *ptask)
 
     /* 取出就绪任务 */
     g_prevtask = g_running_task;
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     switch_task();
@@ -254,7 +291,6 @@ static int far idle_task_proc(void far *p)
 /* 函数实现 */
 void ffkernel_init(void)
 {
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 初始化就绪队列 */
@@ -268,6 +304,12 @@ void ffkernel_init(void)
     sleep_list_head.t_prev = &sleep_list_tail;
     sleep_list_tail.t_next = &sleep_list_head;
     sleep_list_tail.t_prev = &sleep_list_head;
+
+    /* 初始化内核对象列表 */
+    kobjs_list_head.o_next = &kobjs_list_tail;
+    kobjs_list_head.o_prev = &kobjs_list_tail;
+    kobjs_list_tail.o_next = &kobjs_list_head;
+    kobjs_list_tail.o_prev = &kobjs_list_head;
 
     /* 初始化任务指针 */
     g_running_task = &maintask;
@@ -292,16 +334,13 @@ void ffkernel_init(void)
     outportb(0x40, (_8253_COUNTER >> 0) & 0xff);
     outportb(0x40, (_8253_COUNTER >> 8) & 0xff);
 
-    /* 开中断 */
     INTERRUPT_ON();
 }
 
 void ffkernel_exit(void)
 {
-    /* 关中断 */
     INTERRUPT_OFF();
 
-    /* restore int 1ch */
     /* 恢复时钟中断 */
     setvect (0x1c, old_int_1ch);
     outportb(0x43, 0x3c);
@@ -327,7 +366,6 @@ int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
     /* 参数有效性检查 */
     if (!ctask || size < 256) return -1;
 
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 任务控制块清零 */
@@ -366,10 +404,9 @@ int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
     ptask->t_ss = FP_SEG(stack);
     ptask->t_sp = FP_OFF(stack);
 
-    /* 加入就绪队列 */
-    readyenqueue(ptask);
+    ready_enqueue(ptask); /* 加入就绪队列 */
+    kobjs_append((KERNELOBJ*)ptask); /* 加入内核对象列表 */
 
-    /* 开中断 */
     INTERRUPT_ON();
     return 0;
 }
@@ -381,12 +418,12 @@ int task_destroy(void *ctask)
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
-    /* 关中断 */
-    INTERRUPT_OFF();
+    INTERRUPT_OFF(); /* 关中断 */
+    kobjs_remove((KERNELOBJ*)ptask); /* 移除 ptask */
 
     if (g_running_task == ptask) { /* 欲销毁任务为当前运行任务 */
         g_prevtask = NULL;
-        g_nexttask = readydequeue();
+        g_nexttask = ready_dequeue();
         switch_task();
     } else { /* 欲销毁任务不为当前运行任务 */
         if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
@@ -405,16 +442,12 @@ int task_suspend(void *ctask)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务已经运行结束 */
-    if (ptask->o_type & KOBJ_TASK_DONE) return -2;
+    if (ptask->o_type & KOBJ_TASK_DONE) return FFTASK_DONE;
 
-    /* 关中断 */
     INTERRUPT_OFF();
-
-    /* 欲挂起的任务为当前运行任务 */
-    if (g_running_task == ptask) {
-        /* 取出就绪任务 */
+    if (g_running_task == ptask) { /* 欲挂起的任务为当前运行任务 */
         g_prevtask = g_running_task;
-        g_nexttask = readydequeue();
+        g_nexttask = ready_dequeue();
         switch_task();
     } else { /* 欲挂起的任务不为当前运行任务 */
         if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
@@ -433,24 +466,15 @@ int task_resume(void *ctask)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务已经运行结束 */
-    if (ptask->o_type & KOBJ_TASK_DONE) return -2;
+    if (ptask->o_type & KOBJ_TASK_DONE) return FFTASK_DONE;
 
-    /* 关中断 */
     INTERRUPT_OFF();
-
-    /* 如果欲恢复的任务不在当前运行状态 */
-    if (g_running_task != ptask) {
-        /* 将当前运行任务放入就绪队列尾 */
-        readyenqueue(g_running_task);
+    if (g_running_task != ptask) { /* 如果欲恢复的任务不在当前运行状态 */
+        ready_enqueue(g_running_task);
         g_prevtask = g_running_task;
-
-        /* ptch 作为当前任务 */
         g_nexttask = ptask;
-
-        /* 进行任务切换 */
         switch_task();
     } else {
-        /* 开中断 */
         INTERRUPT_ON();
     }
     return 0;
@@ -462,16 +486,20 @@ int task_sleep(int ms)
     /* ms 为零直接返回 */
     if (ms <= 0) return 0;
 
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 设置任务休眠时间 */
     g_running_task->t_timeout = (ms + 9) / 10;
 
     /* 将当前运行的任务放入休眠队列尾 */
-    sleepenqueue(g_running_task);
+    g_running_task->t_prev =  sleep_list_tail.t_prev;
+    g_running_task->t_next = &sleep_list_tail;
+    g_running_task->t_prev->t_next = g_running_task;
+    g_running_task->t_next->t_prev = g_running_task;
+
+    /* 从就绪队列取出就绪任务 */
     g_prevtask = g_running_task;
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     switch_task();
@@ -481,26 +509,32 @@ int task_sleep(int ms)
 int task_wait(void *ctask, int timeout)
 {
     TASKCTRLBLK *ptask = (TASKCTRLBLK*)ctask;
+    int          ret;
 
-    /* 参数有效性检查 */
-    if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
+    if (ptask == NULL || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1; /* 参数有效性检查 */
+    if (ptask->o_type & KOBJ_TASK_DONE) return 0; /* 如果任务已经运行结束 */
 
-    /* 如果任务已经运行结束 */
-    if (ptask->o_type & KOBJ_TASK_DONE) return 0;
+    timeout = (timeout == -1) ? -1 : (timeout + 9) / 10; /* 转换为 tick 为单位 */
+    if (timeout == 0) return FFWAIT_TIMEOUT; /* 如果超时等于零 */
 
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 将当前任务放入 ptask 的等待队列尾 */
-    waitenqueue((KERNELOBJ*)ptask, g_running_task, timeout);
+    wait_enqueue((KERNELOBJ*)ptask, g_running_task, timeout);
 
     /* 取出就绪任务 */
     g_prevtask = g_running_task;
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     switch_task();
-    return 0;
+
+    /* 超时处理 */
+    INTERRUPT_OFF();
+    ret = (g_running_task->o_type & KOBJ_TASK_TIMEOUT) ? FFWAIT_TIMEOUT : 0;
+    g_running_task->o_type &= ~KOBJ_TASK_TIMEOUT;
+    INTERRUPT_ON();
+    return ret;
 }
 
 int task_exitcode(void *ctask, int *code)
@@ -511,7 +545,7 @@ int task_exitcode(void *ctask, int *code)
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
     /* 如果任务未运行结束 */
-    if ((ptask->o_type & KOBJ_TASK_DONE) == 0) return -2;
+    if ((ptask->o_type & KOBJ_TASK_DONE) == 0) return FFTASK_NOTEXIT;
 
     /* 返回结束码 */
     if (code) *code = ptask->t_retv;
@@ -527,6 +561,7 @@ int mutex_create(void *cmutex)
     /* 初始化互斥体 */
     pmutex->o_type  = KOBJ_TYPE_MUTEX;
     pmutex->o_data0 = 1;
+    kobjs_append(pmutex); /* 加入内核对象列表 */
     return 0;
 }
 
@@ -537,18 +572,21 @@ int mutex_destroy(void *cmutex)
 
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
-
+    kobjs_remove(pmutex); /* 从内核对象列表移除 */
     return 0;
 }
 
 int mutex_lock(void *cmutex, int timeout)
 {
     KERNELOBJ *pmutex = (KERNELOBJ*)cmutex;
+    int        ret;
 
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
-    /* 关中断 */
+    /* 转换为 tick 为单位 */
+    timeout = (timeout == -1) ? -1 : (timeout + 9) / 10;
+
     INTERRUPT_OFF();
 
     /* 互斥体加锁 */
@@ -559,20 +597,33 @@ int mutex_lock(void *cmutex, int timeout)
         return 0;
     }
 
+    /* 如果超时等于零 */
+    if (timeout == 0) {
+        INTERRUPT_ON();
+        return FFWAIT_TIMEOUT;
+    }
+
     /* 将当前任务放入 pmutex 的等待队列尾 */
-    waitenqueue(pmutex, g_running_task, timeout);
+    wait_enqueue(pmutex, g_running_task, timeout);
 
     /* 取出就绪任务 */
     g_prevtask = g_running_task;
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     switch_task();
 
+    /* 设置 mutex 的所有者和超时处理 */
     INTERRUPT_OFF();
-    pmutex->o_owner = g_running_task;
+    if (g_running_task->o_type & KOBJ_TASK_TIMEOUT) {
+        g_running_task->o_type &= ~KOBJ_TASK_TIMEOUT;
+        ret = FFWAIT_TIMEOUT;
+    } else {
+        pmutex->o_owner = g_running_task;
+        ret =  0;
+    }
     INTERRUPT_ON();
-    return 0;
+    return ret;
 }
 
 int mutex_unlock(void *cmutex)
@@ -582,13 +633,12 @@ int mutex_unlock(void *cmutex)
     /* 参数有效性检查 */
     if (!pmutex || (pmutex->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_MUTEX) return -1;
 
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 当前任务不是 mutex 的所有者 */
     if (pmutex->o_owner != g_running_task) {
         INTERRUPT_ON();
-        return -2;
+        return FFMUTEX_NOTOWNER;
     }
 
     /* 如果没有任务等待该互斥体则返回 */
@@ -601,11 +651,11 @@ int mutex_unlock(void *cmutex)
     }
 
     /* 将当前运行任务放入就绪队列尾 */
-    readyenqueue(g_running_task);
+    ready_enqueue(g_running_task);
     g_prevtask = g_running_task;
 
     /* 将第一个等待 pmutex 的任务取出 */
-    g_nexttask = waitdequeue(pmutex);
+    g_nexttask = wait_dequeue(pmutex);
 
     /* 进行任务切换 */
     switch_task();
@@ -621,6 +671,7 @@ int sem_create(void *csem, int initval, int maxval)
     psem->o_type  = KOBJ_TYPE_SEM;
     psem->o_data0 = initval;
     psem->o_data1 = maxval ;
+    kobjs_append(psem); /* 加入内核对象列表 */
     return 0;
 }
 
@@ -630,18 +681,21 @@ int sem_destroy(void *csem)
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
-
+    kobjs_remove(psem); /* 从内核对象列表移除 */
     return 0;
 }
 
 int sem_wait(void *csem, int timeout)
 {
     KERNELOBJ *psem = (KERNELOBJ*)csem;
+    int        ret;
 
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
-    /* 关中断 */
+    /* 转换为 tick 为单位 */
+    timeout = (timeout == -1) ? -1 : (timeout + 9) / 10;
+
     INTERRUPT_OFF();
 
     /* 如果信号量大于零 */
@@ -651,15 +705,28 @@ int sem_wait(void *csem, int timeout)
         return 0;
     }
 
+    /* 如果超时等于零 */
+    if (timeout <= 0) {
+        INTERRUPT_ON();
+        return FFWAIT_TIMEOUT;
+    }
+
     /* 将当前任务放入 psem 的等待队列尾 */
-    waitenqueue(psem, g_running_task, timeout);
+    wait_enqueue(psem, g_running_task, timeout);
 
     /* 取出就绪任务 */
     g_prevtask = g_running_task;
-    g_nexttask = readydequeue();
+    g_nexttask = ready_dequeue();
 
     /* 进行任务切换 */
     switch_task();
+
+    /* 超时处理 */
+    INTERRUPT_OFF();
+    ret = (g_running_task->o_type & KOBJ_TASK_TIMEOUT) ? FFWAIT_TIMEOUT : 0;
+    g_running_task->o_type &= ~KOBJ_TASK_TIMEOUT;
+    INTERRUPT_ON();
+    return ret;
 }
 
 int sem_post(void *csem)
@@ -669,7 +736,6 @@ int sem_post(void *csem)
     /* 参数有效性检查 */
     if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
 
-    /* 关中断 */
     INTERRUPT_OFF();
 
     /* 如果没有任务等待该互斥体则返回 */
@@ -682,9 +748,9 @@ int sem_post(void *csem)
     }
 
     /* 将当前运行任务放入就绪队列尾 */
-    readyenqueue(g_running_task);
+    ready_enqueue(g_running_task);
     g_prevtask = g_running_task;
-    g_nexttask = waitdequeue(psem); /* 将第一个等待 psem 的任务取出 */
+    g_nexttask = wait_dequeue(psem); /* 将第一个等待 psem 的任务取出 */
 
     /* 进行任务切换 */
     switch_task();
