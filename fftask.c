@@ -22,36 +22,6 @@
 #define KOBJ_TASK_DONE    (1 << 3)
 #define KOBJ_TASK_TIMEOUT (1 << 4)
 
-#define KOBJ_COMMON_MEMBERS \
-    struct tagKERNELOBJ   *o_next; \
-    struct tagKERNELOBJ   *o_prev; \
-    struct tagTASKCTRLBLK *w_head; \
-    struct tagTASKCTRLBLK *w_tail; \
-    int    o_type;
-
-/* 默认任务堆栈大小 */
-#define TASK_STACK_SIZE  1024
-
-/* 内部类型定义 */
-/* 任务控制块类型定义 */
-typedef struct tagTASKCTRLBLK {
-    KOBJ_COMMON_MEMBERS
-    struct tagTASKCTRLBLK *t_next;
-    struct tagTASKCTRLBLK *t_prev;
-    int t_timeout; /* 任务休眠超时 */
-    int t_retv;    /* 任务返回值 */
-    int t_ss;      /* 任务堆栈 ss */
-    int t_sp;      /* 任务堆栈 sp */
-    int t_stack[0];/* 任务堆栈 */
-} TASKCTRLBLK;     /* 任务控制块 */
-
-typedef struct tagKERNELOBJ {
-    KOBJ_COMMON_MEMBERS
-    int   o_data0;
-    int   o_data1;
-    void *o_owner;
-} KERNELOBJ;
-
 /* 内部全局变量定义 */
 static void interrupt (*old_int_1ch)(void); /* 用于保存旧的时钟中断 */
 
@@ -60,12 +30,13 @@ static TASKCTRLBLK  ready_list_head = {0};  /* 任务就绪队列头 */
 static TASKCTRLBLK  ready_list_tail = {0};  /* 任务就绪队列尾 */
 static TASKCTRLBLK  sleep_list_head = {0};  /* 任务休眠队列头 */
 static TASKCTRLBLK  sleep_list_tail = {0};  /* 任务休眠队列尾 */
-static KERNELOBJ    kobjs_list_head  = {0}; /* 内核对象列表头 */
-static KERNELOBJ    kobjs_list_tail  = {0}; /* 内核对象列表尾 */
-static TASKCTRLBLK *g_running_task  = NULL; /* 当前运行的任务 */
-static TASKCTRLBLK *g_prevtask      = NULL; /* 任务切换的前一个任务 */
-static TASKCTRLBLK *g_nexttask      = NULL; /* 任务切换的下一个任务 */
+static KERNELOBJ    kobjs_list_head = {0};  /* 内核对象列表头 */
+static KERNELOBJ    kobjs_list_tail = {0};  /* 内核对象列表尾 */
 static char         g_idletask[256];        /* 空闲任务控制块 */
+
+TASKCTRLBLK *g_running_task  = NULL; /* 当前运行的任务 */
+TASKCTRLBLK *g_prevtask      = NULL; /* 任务切换的前一个任务 */
+TASKCTRLBLK *g_nexttask      = NULL; /* 任务切换的下一个任务 */
 
 unsigned long g_tick_counter = 1;  /* 该变量用于记录系统 tick 次数 */
 unsigned long g_idle_counter = 1;  /* 该变量用于记录空闲任务次数 */
@@ -769,3 +740,24 @@ int sem_getval(void *csem, int *value)
     return 0;
 }
 
+int sem_post_int(void *csem)
+{
+    KERNELOBJ *psem = (KERNELOBJ*)csem;
+
+    /* 参数有效性检查 */
+    if (!psem || (psem->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_SEM) return -1;
+
+    /* 如果没有任务等待该互斥体则返回 */
+    if (!psem->w_head) {
+        if (psem->o_data0 < psem->o_data1) {
+            psem->o_data0++;
+        }
+        return 0;
+    }
+
+    /* 将当前运行任务放入就绪队列尾 */
+    ready_enqueue(g_running_task);
+    g_prevtask = g_running_task;
+    g_nexttask = wait_dequeue(psem); /* 将第一个等待 psem 的任务取出 */
+    return 1;
+}
