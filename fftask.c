@@ -180,13 +180,13 @@ static void handle_wait_task(void)
             pready = ptask;
             ptask  = ptask->t_next;
 
-            /* 判断休眠是否完成 */
+            /* 判断等待是否超时 */
             if (pready->t_timeout != -1 && --pready->t_timeout == 0) {
-                /* 将 pready 从休眠队列中删除 */
+                /* 将 pready 从等待队列中删除 */
                 if (pready->t_next) pready->t_next->t_prev = pready->t_prev;
-                else kobjs_list_head.w_tail = pready->t_prev;
+                else kobj->w_tail = pready->t_prev;
                 if (pready->t_prev) pready->t_prev->t_next = pready->t_next;
-                else kobjs_list_head.w_head = pready->t_next;
+                else kobj->w_head = pready->t_next;
 
                 /* 设置等待超时标记 */
                 pready->o_type |= KOBJ_TASK_TIMEOUT;

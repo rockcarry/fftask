@@ -98,15 +98,21 @@ void main(void)
 
     mutex_lock(g_dos_mutex, -1);
     printf("please wait task1 and task2 done.\r\n");
-    printf("please wait task1 and task2 done.\r\n");
-    printf("please wait task1 and task2 done.\r\n");
     mutex_unlock(g_dos_mutex);
 
-    task_wait(g_ctask1, -1);
-    task_exitcode(g_ctask1, &exitcode1);
-    mutex_lock(g_dos_mutex, -1);
-    printf("wait htask1 done, exitcode = %u.\r\n", exitcode1);
-    mutex_unlock(g_dos_mutex);
+    while (1) {
+        int ret = task_wait(g_ctask1, 200);
+        if (ret == FFWAIT_TIMEOUT) {
+            mutex_lock(g_dos_mutex, -1);
+            printf("wait htask1 done timeout !\r\n", exitcode1);
+            mutex_unlock(g_dos_mutex);
+        } else {
+            mutex_lock(g_dos_mutex, -1);
+            printf("wait htask1 done, exitcode = %u.\r\n", exitcode1);
+            mutex_unlock(g_dos_mutex);
+            break;
+        }
+    }
 
     task_wait(g_ctask2, -1);
     task_exitcode(g_ctask2, &exitcode2);
