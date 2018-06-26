@@ -2,7 +2,7 @@
 #define __FFTASK_H__
 
 /* 常量定义 */
-#define TASK_CTXT_SIZE  18
+#define TASK_CTXT_SIZE  22
 #define KOBJ_CTXT_SIZE  16
 
 /* 任务函数类型定义 */

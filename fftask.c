@@ -35,6 +35,8 @@
 /* 任务控制块类型定义 */
 typedef struct tagTASKCTRLBLK {
     KOBJ_COMMON_MEMBERS
+    struct tagTASKCTRLBLK *t_next;
+    struct tagTASKCTRLBLK *t_prev;
     int t_timeout; /* 任务休眠超时 */
     int t_retv;    /* 任务返回值 */
     int t_ss;      /* 任务堆栈 ss */
@@ -57,7 +59,8 @@ static TASKCTRLBLK  ready_list_head = {0};  /* 任务就绪队列头 */
 static TASKCTRLBLK  ready_list_tail = {0};  /* 任务就绪队列尾 */
 static TASKCTRLBLK  sleep_list_head = {0};  /* 任务休眠队列头 */
 static TASKCTRLBLK  sleep_list_tail = {0};  /* 任务休眠队列尾 */
-static KERNELOBJ    kobj_list_head  = {0};  /*  */
+static KERNELOBJ    kobj_list_head  = {0};  /* 内核对象列表头 */
+static KERNELOBJ    kobj_list_tail  = {0};  /* 内核对象列表尾 */
 static TASKCTRLBLK *g_running_task  = NULL; /* 当前运行的任务 */
 static TASKCTRLBLK *g_prevtask      = NULL; /* 任务切换的前一个任务 */
 static TASKCTRLBLK *g_nexttask      = NULL; /* 任务切换的下一个任务 */
@@ -72,19 +75,19 @@ unsigned long g_idle_counter = 1;  /* 该变量用于记录空闲任务次数 */
 static void readyenqueue(TASKCTRLBLK *ptask)
 {
     if (ptask == (TASKCTRLBLK*)g_idletask) return;
-    ptask->o_prev =  ready_list_tail.o_prev;
-    ptask->o_next = &ready_list_tail;
-    ptask->o_prev->o_next = ptask;
-    ptask->o_next->o_prev = ptask;
+    ptask->t_prev =  ready_list_tail.t_prev;
+    ptask->t_next = &ready_list_tail;
+    ptask->t_prev->t_next = ptask;
+    ptask->t_next->t_prev = ptask;
 }
 
 /* 就绪队列出队 */
 static TASKCTRLBLK* readydequeue(void)
 {
-    TASKCTRLBLK *ptask = ready_list_head.o_next;
+    TASKCTRLBLK *ptask = ready_list_head.t_next;
     if (ptask != &ready_list_tail) {
-        ptask->o_prev->o_next = ptask->o_next;
-        ptask->o_next->o_prev = ptask->o_prev;
+        ptask->t_prev->t_next = ptask->t_next;
+        ptask->t_next->t_prev = ptask->t_prev;
         return ptask;
     } else {
         return (TASKCTRLBLK*)g_idletask;
@@ -94,18 +97,18 @@ static TASKCTRLBLK* readydequeue(void)
 /* 休眠队列入队 */
 static void sleepenqueue(TASKCTRLBLK *ptask)
 {
-    ptask->o_prev =  sleep_list_tail.o_prev;
-    ptask->o_next = &sleep_list_tail;
-    ptask->o_prev->o_next = ptask;
-    ptask->o_next->o_prev = ptask;
+    ptask->t_prev =  sleep_list_tail.t_prev;
+    ptask->t_next = &sleep_list_tail;
+    ptask->t_prev->t_next = ptask;
+    ptask->t_next->t_prev = ptask;
 }
 
 static TASKCTRLBLK* waitdequeue(KERNELOBJ *kobj)
 {
     TASKCTRLBLK *ptask = kobj->w_head;
-    kobj->w_head = kobj->w_head->o_next;
+    kobj->w_head = kobj->w_head->t_next;
     if (kobj->w_head) {
-        kobj->w_head->o_prev = NULL;
+        kobj->w_head->t_prev = NULL;
     } else {
         kobj->w_tail = NULL;
     }
@@ -115,10 +118,10 @@ static TASKCTRLBLK* waitdequeue(KERNELOBJ *kobj)
 static void waitenqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
 {
     ptask->t_timeout = timeout;
-    ptask->o_next    = NULL;
-    ptask->o_prev    = ptask->w_tail;
+    ptask->t_next    = NULL;
+    ptask->t_prev    = ptask->w_tail;
     if (kobj->w_tail) {
-        kobj->w_tail->o_next = ptask;
+        kobj->w_tail->t_next = ptask;
     }
     kobj->w_tail = ptask;
     if (kobj->w_head == NULL) {
@@ -130,25 +133,25 @@ static void waitenqueue(KERNELOBJ *kobj, TASKCTRLBLK *ptask, int timeout)
 /* 处理休眠队列 */
 static void handle_sleep_task(void)
 {
-    TASKCTRLBLK *ptask = sleep_list_tail.o_prev;
+    TASKCTRLBLK *ptask = sleep_list_tail.t_prev;
     TASKCTRLBLK *pready;
 
     /* 从尾至头遍历休眠队列 */
     while (ptask != &sleep_list_head) {
         pready = ptask;
-        ptask  = ptask->o_prev;
+        ptask  = ptask->t_prev;
 
         /* 判断休眠是否完成 */
         if (--pready->t_timeout == 0) {
             /* 将 pready 从休眠队列中删除 */
-            pready->o_next->o_prev = pready->o_prev;
-            pready->o_prev->o_next = pready->o_next;
+            pready->t_next->t_prev = pready->t_prev;
+            pready->t_prev->t_next = pready->t_next;
 
             /* 将 pready 加入就绪队列头 */
-            pready->o_next =  ready_list_head.o_next;
-            pready->o_prev = &ready_list_head;
-            pready->o_prev->o_next = pready;
-            pready->o_next->o_prev = pready;
+            pready->t_next =  ready_list_head.t_next;
+            pready->t_prev = &ready_list_head;
+            pready->t_prev->t_next = pready;
+            pready->t_next->t_prev = pready;
         }
     }
 }
@@ -216,10 +219,10 @@ static void far task_done_handler(TASKCTRLBLK far *ptask)
 
     /* 将所有等待 ptask 的任务放入就绪队列头 */
     if (ptask->w_head) {
-        ptask->w_tail->o_next =  ready_list_head.o_next;
-        ready_list_head.o_next->o_prev = ptask->w_tail;
-        ready_list_head.o_next = ptask->w_head;
-        ptask->w_head->o_prev = &ready_list_head;
+        ptask->w_tail->t_next =  ready_list_head.t_next;
+        ready_list_head.t_next->t_prev = ptask->w_tail;
+        ready_list_head.t_next = ptask->w_head;
+        ptask->w_head->t_prev = &ready_list_head;
         ptask->w_head = ptask->w_tail = NULL;
     }
 
@@ -255,16 +258,16 @@ void ffkernel_init(void)
     INTERRUPT_OFF();
 
     /* 初始化就绪队列 */
-    ready_list_head.o_next = &ready_list_tail;
-    ready_list_head.o_prev = &ready_list_tail;
-    ready_list_tail.o_next = &ready_list_head;
-    ready_list_tail.o_prev = &ready_list_head;
+    ready_list_head.t_next = &ready_list_tail;
+    ready_list_head.t_prev = &ready_list_tail;
+    ready_list_tail.t_next = &ready_list_head;
+    ready_list_tail.t_prev = &ready_list_head;
 
     /* 初始化休眠队列 */
-    sleep_list_head.o_next = &sleep_list_tail;
-    sleep_list_head.o_prev = &sleep_list_tail;
-    sleep_list_tail.o_next = &sleep_list_head;
-    sleep_list_tail.o_prev = &sleep_list_head;
+    sleep_list_head.t_next = &sleep_list_tail;
+    sleep_list_head.t_prev = &sleep_list_tail;
+    sleep_list_tail.t_next = &sleep_list_head;
+    sleep_list_tail.t_prev = &sleep_list_head;
 
     /* 初始化任务指针 */
     g_running_task = &maintask;
@@ -275,8 +278,8 @@ void ffkernel_init(void)
     task_create(idle_task_proc, NULL, g_idletask, sizeof(g_idletask));
 
     /* 将空闲任务从就绪队列中删除 */
-    ((TASKCTRLBLK*)g_idletask)->o_next->o_prev = ((TASKCTRLBLK*)g_idletask)->o_prev;
-    ((TASKCTRLBLK*)g_idletask)->o_prev->o_next = ((TASKCTRLBLK*)g_idletask)->o_next;
+    ((TASKCTRLBLK*)g_idletask)->t_next->t_prev = ((TASKCTRLBLK*)g_idletask)->t_prev;
+    ((TASKCTRLBLK*)g_idletask)->t_prev->t_next = ((TASKCTRLBLK*)g_idletask)->t_next;
 
     /* 初始化 int 1ch 中断 */
     old_int_1ch = getvect(0x1c);
@@ -386,8 +389,8 @@ int task_destroy(void *ctask)
         g_nexttask = readydequeue();
         switch_task();
     } else { /* 欲销毁任务不为当前运行任务 */
-        if (ptask->o_next) ptask->o_next->o_prev = ptask->o_prev;
-        if (ptask->o_prev) ptask->o_prev->o_next = ptask->o_next;
+        if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
+        if (ptask->t_prev) ptask->t_prev->t_next = ptask->t_next;
         INTERRUPT_ON();
     }
 
@@ -414,8 +417,8 @@ int task_suspend(void *ctask)
         g_nexttask = readydequeue();
         switch_task();
     } else { /* 欲挂起的任务不为当前运行任务 */
-        if (ptask->o_next) ptask->o_next->o_prev = ptask->o_prev;
-        if (ptask->o_prev) ptask->o_prev->o_next = ptask->o_next;
+        if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
+        if (ptask->t_prev) ptask->t_prev->t_next = ptask->t_next;
         INTERRUPT_ON();
     }
 
