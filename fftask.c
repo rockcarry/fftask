@@ -195,8 +195,6 @@ static void interrupt new_int_1ch(void)
     g_running_task = g_nexttask;
     g_idle_counter+=(g_running_task == (TASKCTRLBLK*)g_idletask);
 
-    /* 清除中断屏蔽 */
-    outp(0x20, 0x20);
     INTERRUPT_ON();
 }
 
@@ -677,7 +675,7 @@ int sem_wait(void *csem, int timeout)
     }
 
     /* 如果超时等于零 */
-    if (timeout <= 0) {
+    if (timeout == 0) {
         INTERRUPT_ON();
         return FFWAIT_TIMEOUT;
     }
@@ -740,7 +738,7 @@ int sem_getval(void *csem, int *value)
     return 0;
 }
 
-int sem_post_int(void *csem)
+int sem_post_interrupt(void *csem)
 {
     KERNELOBJ *psem = (KERNELOBJ*)csem;
 
