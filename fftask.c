@@ -296,6 +296,7 @@ void ffkernel_init(void)
     old_int_1ch = getvect(0x1c);
     setvect(0x1c, new_int_1ch);
 
+
     /* set to 100Hz freq */
     #define _8253_FREQ     1193181L
     #define _8253_COUNTER  11932L
@@ -341,7 +342,7 @@ int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
     memset(ptask, 0, sizeof(TASKCTRLBLK));
 
     /* 指向任务栈顶 */
-    stack = (ptask->t_stack + size - sizeof(TASKCTRLBLK));
+    stack = (int*)((char*)ptask->t_stack + size - sizeof(TASKCTRLBLK));
 
     /* 任务控制块地址入栈 */
     *--stack = FP_SEG(ptask);
