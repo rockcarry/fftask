@@ -73,7 +73,7 @@ int  sem_getval   (void *csem, int *value);
 
 /*++ 中断服务中 post 信号量 ++*/
 int sem_post_interrupt(void *csem);
-#define DO_TASK_SWITCH() do {   \
+#define INT_TASK_SWITCH() do {  \
     g_prevtask->t_ss = _SS;     \
     g_prevtask->t_sp = _SP;     \
     _SS = g_nexttask->t_ss;     \
