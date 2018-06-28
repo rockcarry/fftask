@@ -5,10 +5,9 @@
 #define WAVDEV_BUFSIZE 2000
 
 /* º¯ÊıÉùÃ÷ */
-void wavdev_init (int samprate);
+void wavdev_init (int channels, unsigned samprate, int sampsize);
 void wavdev_exit (void);
-void wavdev_start(void);
-void wavdev_stop (void);
+void wavdev_play (int play);
 int  wavdev_write(char *buf, int size);
 
 #endif

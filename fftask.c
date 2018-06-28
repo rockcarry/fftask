@@ -296,7 +296,6 @@ void ffkernel_init(void)
     old_int_1ch = getvect(0x1c);
     setvect(0x1c, new_int_1ch);
 
-
     /* set to 100Hz freq */
     #define _8253_FREQ     1193181L
     #define _8253_COUNTER  11932L
@@ -364,7 +363,7 @@ int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
     *--stack = 0;                /* bx */
     *--stack = 0;                /* cx */
     *--stack = 0;                /* dx */
-    *--stack = 0;                /* es */
+    *--stack =_ES;               /* es */
     *--stack =_DS;               /* ds */
     *--stack = 0;                /* si */
     *--stack = 0;                /* di */
@@ -388,18 +387,23 @@ int task_destroy(void *ctask)
     /* 参数有效性检查 */
     if (!ptask || (ptask->o_type & KOBJ_TYPE_MASK) != KOBJ_TYPE_TASK) return -1;
 
-    INTERRUPT_OFF(); /* 关中断 */
+    INTERRUPT_OFF();
     kobjs_remove((KERNELOBJ*)ptask); /* 移除 ptask */
+    if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
+    if (ptask->t_prev) ptask->t_prev->t_next = ptask->t_next;
 
-    if (g_running_task == ptask) { /* 欲销毁任务为当前运行任务 */
-        g_prevtask = NULL;
-        g_nexttask = ready_dequeue();
-        switch_task();
-    } else { /* 欲销毁任务不为当前运行任务 */
-        if (ptask->t_next) ptask->t_next->t_prev = ptask->t_prev;
-        if (ptask->t_prev) ptask->t_prev->t_next = ptask->t_next;
-        INTERRUPT_ON();
+    /* 标记该任务运行结束 */
+    ptask->o_type |= KOBJ_TASK_DONE;
+
+    /* 将所有等待 ptask 的任务放入就绪队列头 */
+    if (ptask->w_head) {
+        ptask->w_tail->t_next =  ready_list_head.t_next;
+        ready_list_head.t_next->t_prev = ptask->w_tail;
+        ready_list_head.t_next = ptask->w_head;
+        ptask->w_head->t_prev = &ready_list_head;
+        ptask->w_head = ptask->w_tail = NULL;
     }
+    INTERRUPT_ON();
 
     return 0;
 }

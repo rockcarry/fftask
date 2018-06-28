@@ -15,171 +15,68 @@ typedef unsigned long  DWORD;
  */
 /* 内部常量定义 */
 /* 以下是 PC 机的 DMA 控制器端口的常量定义 */
-#define DMA8_CMD_PORT      0x08   /* 8 位 DMA 写命令寄存器端口 */
-#define DMA8_STATU_PORT    0x08   /* 8 位 DMA 独状态寄存器端口 */
-#define DMA8_REQUEST_PORT  0x09   /* 8 位 DMA 写请求寄存器端口 */
-#define DMA8_MASK_PORT     0x0A   /* 8 位 DMA 屏蔽寄存器端口（只写）*/
-#define DMA8_MODE_PORT     0x0B   /* 8 位 DMA 写模式寄存器端口 */
-#define DMA8_CLRPTR_PORT   0x0C   /* 8 位 DMA 清先后状态寄存器端口 */
-#define DMA8_RESET_PORT    0x0D   /* 8 位 DMA 写复位命令端口 */
+static BYTE DMAC_CTL_PORT_TAB[][7] = {
+    /* cmd, req,  mask, mode, clr, rst  */
+    { 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D },
+    { 0xD0, 0xD2, 0xD4, 0xD6, 0xD8, 0xDA },
+};
 
-#define DMA16_CMD_PORT     0xD0   /* 16 位 DMA 写命令寄存器端口 */
-#define DMA16_STATU_PORT   0xD0   /* 16 位 DMA 独状态寄存器端口 */
-#define DMA16_REQUEST_PORT 0xD2   /* 16 位 DMA 写请求寄存器端口 */
-#define DMA16_MASK_PORT    0xD4   /* 16 位 DMA 屏蔽寄存器端口（只写）*/
-#define DMA16_MODE_PORT    0xD6   /* 16 位 DMA 写模式寄存器端口 */
-#define DMA16_CLRPTR_PORT  0xD8   /* 16 位 DMA 清先后状态寄存器端口 */
-#define DMA16_RESET_PORT   0xDA   /* 16 位 DMA 写复位命令端口 */
-
-/* 以下是 PC 机 DMA 的 7 个通道的地址寄存器、计数寄存器和页面寄存器的端口常量定义 */
+/* 以下是 PC 机 DMA 的 7 个通道的地址寄存器、计数寄存器和页面寄存器的端口定义 */
 /* 其中通道 0-3 用于 8 位的 DMA，通道 4-7 用于 16 位 DMA */
-/* PC机中，规定通道 2 用于进行软盘的 DMA 传输，其余通道可供用户使用 */
-#define DMA0_ADDR_PORT     0x00   /* 通道 0 的地址寄存器 */
-#define DMA0_COUNT_PORT    0x01   /* 通道 0 的计数寄存器 */
-#define DMA0_PAGE_PORT     0x87   /* 通道 0 的页面寄存器 */
-
-#define DMA1_ADDR_PORT     0x02   /* 通道 1 的地址寄存器 */
-#define DMA1_COUNT_PORT    0x03   /* 通道 1 的计数寄存器 */
-#define DMA1_PAGE_PORT     0x83   /* 通道 1 的页面寄存器 */
-
-#define DMA3_ADDR_PORT     0x06   /* 通道 3 的地址寄存器 */
-#define DMA3_COUNT_PORT    0x07   /* 通道 3 的计数寄存器 */
-#define DMA3_PAGE_PORT     0x82   /* 通道 3 的页面寄存器 */
-
-#define DMA5_ADDR_PORT     0xC4   /* 通道 5 的地址寄存器 */
-#define DMA5_COUNT_PORT    0xC6   /* 通道 5 的计数寄存器 */
-#define DMA5_PAGE_PORT     0x8B   /* 通道 5 的页面寄存器 */
-
-#define DMA6_ADDR_PORT     0xC8   /* 通道 6 的地址寄存器 */
-#define DMA6_COUNT_PORT    0xCA   /* 通道 6 的计数寄存器 */
-#define DMA6_PAGE_PORT     0x89   /* 通道 6 的页面寄存器 */
-
-#define DMA7_ADDR_PORT     0xCC   /* 通道 7 的地址寄存器 */
-#define DMA7_COUNT_PORT    0xCE   /* 通道 7 的计数寄存器 */
-#define DMA7_PAGE_PORT     0x8A   /* 通道 7 的页面寄存器 */
+static BYTE DMAC_ACP_PORT_TAB[][3] = {
+   /* addr, counter, page */
+    { 0x00, 0x01, 0x87 },
+    { 0x02, 0x03, 0x83 },
+    { 0x04, 0x05, 0x81 },
+    { 0x06, 0x07, 0x82 },
+    { 0xC0, 0xC2, 0x8F },
+    { 0xC4, 0xC6, 0x8B },
+    { 0xC8, 0xCA, 0x89 },
+    { 0xCC, 0xCE, 0x8A },
+};
 
 /* 内部函数实现 */
-static int initdma8bit(int channel, BYTE far *addr, int size)
+static int dmac_8237_init(int ch, int dma16, char far *addr, int size)
 {
-    DWORD phyaddr = FP_SEG(addr) * 0x10L + FP_OFF(addr);
+    DWORD phyaddr = (FP_SEG(addr) * 0x10L + FP_OFF(addr)) >> dma16;
     BYTE  page    = (BYTE)(phyaddr >> 16);
     WORD  offset  = (WORD)(phyaddr >> 0 );
-
-    if (channel > 3 || channel == 2) return -1;
-    outportb(DMA8_MASK_PORT, channel | (1 << 2));  /* 屏蔽该通道 */
-    outportb(DMA8_MODE_PORT, channel | (1 << 4) | (2 << 2)); /* 请求方式 + 自动初始化 + 读传送 */
-    outportb(DMA8_CLRPTR_PORT, 0);
-    size--;
-    switch (channel) {
-    case 0:
-        outportb(DMA0_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA0_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA0_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA0_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA0_PAGE_PORT ,  page);
-        break;
-    case 1:
-        outportb(DMA1_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA1_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA1_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA1_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA1_PAGE_PORT ,  page);
-        break;
-    case 3:
-        outportb(DMA3_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA3_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA3_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA3_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA3_PAGE_PORT ,  page);
-        break;
-    }
-    outportb(DMA8_MASK_PORT, channel);
-    return 0;
+    size -= 1;
+    outportb(DMAC_CTL_PORT_TAB[dma16][2], (ch % 4) | (1 << 2)); /* 屏蔽该通道 */
+    outportb(DMAC_CTL_PORT_TAB[dma16][3], (ch % 4) | (1 << 4) | (2 << 2)); /* 请求方式 + 自动初始化 + 读传送 */
+    outportb(DMAC_CTL_PORT_TAB[dma16][4], 0);
+    outportb(DMAC_ACP_PORT_TAB[ch][0], (BYTE)(offset >> 0));
+    outportb(DMAC_ACP_PORT_TAB[ch][0], (BYTE)(offset >> 8));
+    outportb(DMAC_ACP_PORT_TAB[ch][1], (BYTE)(size   >> 0));
+    outportb(DMAC_ACP_PORT_TAB[ch][1], (BYTE)(size   >> 8));
+    outportb(DMAC_ACP_PORT_TAB[ch][2],  page);
+    outportb(DMAC_CTL_PORT_TAB[dma16][2], (ch % 4)); /* 解除屏蔽 */
 }
 
-static void closedma8bit(int channel)
+static void dmac_8237_close(int ch, int dma16)
 {
-    if (channel > 3 || channel == 2) return;
-    outportb(DMA8_MASK_PORT, channel | (1 << 2));  /* 屏蔽该通道 */
+    outportb(DMAC_CTL_PORT_TAB[dma16][2], (ch % 4) | (1 << 2));  /* 屏蔽该通道 */
 }
-
-#if 0  /* todo.. */
-static int initdma16bit(int channel, BYTE far *addr, int size)
-{
-    DWORD phyaddr = FP_SEG(addr) * 0x10L + FP_OFF(addr);
-    BYTE  page    = (BYTE)(phyaddr >> 17);
-    WORD  offset  = (WORD)(phyaddr >> 1);
-
-    if (channel < 5) return -1;
-    outportb(DMA16_MASK_PORT, (channel - 4) | (1 << 2));  /* 屏蔽该通道 */
-    outportb(DMA16_MODE_PORT, (channel - 4) | (1 << 4) | (2 << 2)); /* 请求方式 + 自动初始化 + 读传送 */
-    outportb(DMA16_CLRPTR_PORT, 0);
-    size /= 2; size--;
-    switch (channel) {
-    case 5:
-        outportb(DMA5_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA5_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA5_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA5_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA5_PAGE_PORT ,  page);
-        break;
-    case 6:
-        outportb(DMA6_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA6_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA6_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA6_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA6_PAGE_PORT ,  page);
-        break;
-    case 7:
-        outportb(DMA7_COUNT_PORT, (BYTE)(size   >> 0));
-        outportb(DMA7_COUNT_PORT, (BYTE)(size   >> 8));
-        outportb(DMA7_ADDR_PORT , (BYTE)(offset >> 0));
-        outportb(DMA7_ADDR_PORT , (BYTE)(offset >> 8));
-        outportb(DMA7_PAGE_PORT ,  page);
-        break;
-    }
-    outportb(DMA16_MASK_PORT, channel - 4);
-    return 0;
-}
-
-static void closedma16bit(int channel)
-{
-    if (channel <= 4) return;
-    outportb(DMA16_MASK_PORT, (channel - 4) | (1 << 2));  /* 屏蔽该通道 */
-}
-#endif
-
 
 /*
   dsp
  */
 /* 内部类型定义 */
 typedef struct {
-    char dspenvstr[128];
-    WORD dspversion;
-    WORD dspbaseioport;
-    WORD resetport;
-    WORD writedataport;
-    WORD writestatusport;
-    WORD readdataport;
-    WORD readstatusport;
-    WORD mixerbaseioport;
-    WORD mpu401baseioport;
-    BYTE dspirqnum;
-    BYTE dspdma8;
-    BYTE dspdma16;
+    char envstr[128];
+    WORD version;
+    WORD port_base;
+    WORD port_reset;
+    WORD port_read;
+    WORD port_write;
+    WORD port_status;
+    WORD port_ack16;
+    WORD port_mixer;
+    WORD port_mpu401;
+    BYTE irq_num;
+    BYTE ch_dma8;
+    BYTE ch_dma16;
 } DSP;
-
-/* 内部常量定义 */
-#define DSP_RESET_DELAY   10
-#define DSP_READY         0xAA
-
-/* DSP 命令常量定义 */
-#define DSP_GET_VERSION   0xE1
-#define DSP_SET_BLK_SIZE  0x48
-#define DSP_START_DMA8    0x1C
-#define DSP_PAUSE_DMA8    0xD0
-#define DSP_SET_SAMPRATE  0x40
 
 /* 内部函数实现 */
 static int parse_sb_envstr(char *envstr, char id)
@@ -195,127 +92,148 @@ static int parse_sb_envstr(char *envstr, char id)
 
 static int readdsp(DSP *dsp)
 {
-    while (!(inportb(dsp->readstatusport) & (1 << 7)));
-    return(inportb(dsp->readdataport));
+    while (!(inportb(dsp->port_status) & (1 << 7)));
+    return(inportb(dsp->port_read));
 }
 
 static void writedsp(DSP *dsp, BYTE byte)
 {
-    while (inportb(dsp->writestatusport) & (1 << 7));
-    outportb(dsp->writedataport, byte);
+    while (inportb(dsp->port_write) & (1 << 7));
+    outportb(dsp->port_write, byte);
 }
 
 static void resetdsp(DSP *dsp)
 {
     int i;
-    outportb(dsp->resetport, 1);
-    for (i=0; i<DSP_RESET_DELAY; i++) inportb(dsp->resetport);
-    outportb(dsp->resetport,0);
-    while (readdsp(dsp) != DSP_READY);
+    outportb(dsp->port_reset, 1);
+    for (i=0; i<10; i++) inportb(dsp->port_reset);
+    outportb(dsp->port_reset,0);
+    while (readdsp(dsp) != 0xAA);
 }
 
-static int initdsp(DSP *dsp)
+static int dsp_init(DSP *dsp)
 {
     if (!getenv("BLASTER")) return -1;
-    strupr(strcpy(dsp->dspenvstr, getenv("BLASTER")));
+    strupr(strcpy(dsp->envstr, getenv("BLASTER")));
 
-    dsp->dspbaseioport    = parse_sb_envstr(dsp->dspenvstr, 'A');
-    dsp->resetport        = dsp->dspbaseioport + 0x06;
-    dsp->writedataport    = dsp->dspbaseioport + 0x0C;
-    dsp->writestatusport  = dsp->dspbaseioport + 0x0C;
-    dsp->readdataport     = dsp->dspbaseioport + 0x0A;
-    dsp->readstatusport   = dsp->dspbaseioport + 0x0E;
-    dsp->dspirqnum        = parse_sb_envstr(dsp->dspenvstr, 'I');
-    dsp->dspdma8          = parse_sb_envstr(dsp->dspenvstr, 'D');
-    dsp->dspdma16         = parse_sb_envstr(dsp->dspenvstr, 'H');
-    dsp->mixerbaseioport  = parse_sb_envstr(dsp->dspenvstr, 'M');
-    dsp->mpu401baseioport = parse_sb_envstr(dsp->dspenvstr, 'P');
+    dsp->port_base   = parse_sb_envstr(dsp->envstr, 'A');
+    dsp->port_reset  = dsp->port_base + 0x06;
+    dsp->port_read   = dsp->port_base + 0x0A;
+    dsp->port_write  = dsp->port_base + 0x0C;
+    dsp->port_status = dsp->port_base + 0x0E;
+    dsp->port_ack16  = dsp->port_base + 0x0F;
+    dsp->irq_num     = parse_sb_envstr(dsp->envstr, 'I');
+    dsp->ch_dma8     = parse_sb_envstr(dsp->envstr, 'D');
+    dsp->ch_dma16    = parse_sb_envstr(dsp->envstr, 'H');
+    dsp->port_mixer  = parse_sb_envstr(dsp->envstr, 'M');
+    dsp->port_mpu401 = parse_sb_envstr(dsp->envstr, 'P');
 
     /* reset dsp */
     resetdsp(dsp);
 
     /* get version */
-    writedsp(dsp, DSP_GET_VERSION);
-    dsp->dspversion  = readdsp(dsp) << 8;
-    dsp->dspversion |= readdsp(dsp);
+    writedsp(dsp, 0xE1);
+    dsp->version  = readdsp(dsp) << 8;
+    dsp->version |= readdsp(dsp);
     return 0;
 }
 
-static void closedsp(DSP *dsp)
+static void dsp_close(DSP *dsp)
 {
     /* reset dsp */
     resetdsp(dsp);
 }
 
-#ifdef DEBUG
+#if 0
 static void printdspinfo(DSP *dsp)
 {
-    printf("DSP_ENVSTR:           %s\r\n", dsp->dspenvstr);
-    printf("DSP_VERSION:          %x\r\n", dsp->dspversion);
-    printf("DSP_BASEIOPORT:       %x\r\n", dsp->dspbaseioport);
-    printf("DSP_RESETPORT:        %x\r\n", dsp->resetport);
-    printf("DSP_WRITEDATAPORT:    %x\r\n", dsp->writedataport);
-    printf("DSP_WRITESTATUSPORT:  %x\r\n", dsp->writestatusport);
-    printf("DSP_READDATAPORT:     %x\r\n", dsp->readdataport);
-    printf("DSP_READSTATUSPORT:   %x\r\n", dsp->readstatusport);
-    printf("DSP_MIXERBASEIOPORT:  %x\r\n", dsp->mixerbaseioport);
-    printf("DSP_MPU401BASEIOPORT: %x\r\n", dsp->mpu401baseioport);
-    printf("DSP_IRQNUM:           %x\r\n", dsp->dspirqnum);
-    printf("DSP_DMA8:             %x\r\n", dsp->dspdma8);
-    printf("DSP_DMA16:            %x\r\n", dsp->dspdma16);
+    printf("envstr:      %s\r\n", dsp->envstr     );
+    printf("version:     %x\r\n", dsp->version    );
+    printf("port_base:   %x\r\n", dsp->port_base  );
+    printf("port_reset:  %x\r\n", dsp->port_reset );
+    printf("port_read:   %x\r\n", dsp->port_read  );
+    printf("port_write:  %x\r\n", dsp->port_write );
+    printf("port_status: %x\r\n", dsp->port_status);
+    printf("port_ack16:  %x\r\n", dsp->port_ack16 );
+    printf("port_mixer:  %x\r\n", dsp->port_mixer );
+    printf("port_mpu401: %x\r\n", dsp->port_mpu401);
+    printf("irq_num:     %x\r\n", dsp->irq_num    );
+    printf("ch_dma8:     %x\r\n", dsp->ch_dma8    );
+    printf("ch_dma16:    %x\r\n", dsp->ch_dma16   );
 }
 #endif
 
-static void dspsetsamplerate(DSP *dsp, WORD rate)
+static void dsp_int_done(DSP *dsp, int dma16)
 {
-    WORD timeconst = (WORD)(65536L - (256000000L / rate));
-    writedsp(dsp, DSP_SET_SAMPRATE);
-    writedsp(dsp, timeconst >> 8);
+    inportb(dma16 ? dsp->port_ack16 : dsp->port_status);
 }
 
-static void dspsetblocksize(DSP *dsp, WORD blksize)
+#define MODE_STEREO  (1 << 5)
+#define MODE_SIGNED  (1 << 4)
+static void dsp_dma_init(DSP *dsp, WORD blksize, WORD samprate, int dma16, int mode)
 {
-    blksize--;
-    writedsp(dsp, DSP_SET_BLK_SIZE);
-    writedsp(dsp, (BYTE)(blksize >> 0));
-    writedsp(dsp, (BYTE)(blksize >> 8));
+    blksize -= 1;
+    if (dsp->version <= 0x201) {
+        /* set sample rate */
+        WORD val = (WORD)(65536L - (256000000L / samprate));
+        writedsp(dsp, 0x40);
+        writedsp(dsp, val >> 8);
+
+        writedsp(dsp, 0x48);
+        writedsp(dsp, (BYTE)(blksize >> 0));
+        writedsp(dsp, (BYTE)(blksize >> 8));
+        writedsp(dsp, 0x1C);
+    } else {
+        /* set sample rate */
+        writedsp(dsp, 0x41);
+        writedsp(dsp, (BYTE)(samprate >> 8));
+        writedsp(dsp, (BYTE)(samprate >> 0));
+
+        writedsp(dsp, dma16 ? 0xB6 : 0xC6);
+        writedsp(dsp, (BYTE)mode);
+        writedsp(dsp, (BYTE)(blksize >> 0));
+        writedsp(dsp, (BYTE)(blksize >> 8));
+    }
 }
 
-static void dspintdone(DSP *dsp)
+static void dsp_dma_close(DSP *dsp, int dma16)
 {
-    inportb(dsp->readstatusport);
+    writedsp(dsp, dma16 ? 0xD9 : 0xDA);
 }
 
-static void dspstartdma8bit(DSP *dsp)
+static void dsp_dma_pause(DSP *dsp, int dma16, int pause)
 {
-    writedsp(dsp, DSP_START_DMA8);
-}
-
-static void dsppausedma8bit(DSP *dsp)
-{
-    writedsp(dsp, DSP_PAUSE_DMA8);
+    if (dsp->version <= 0x201) {
+        writedsp(dsp, pause ? 0xD0 : 0x1C);
+    } else {
+        if (pause) {
+            writedsp(dsp, dma16 ? 0xD5 : 0xD0);
+        } else {
+            writedsp(dsp, dma16 ? 0xD6 : 0xD4);
+        }
+    }
 }
 
 
 /*
   wavdev
  */
-/* 内部常量定义 */
-#define WAVDEV_BUFSIZE   2000
-
 /* 内部全局变量定义 */
-static DSP  g_dsp_dev  = {0};
-static int  g_dma_flag =  0;
-static char g_dma_buf[WAVDEV_BUFSIZE * 2 + 1];
+static char g_dma_buf[WAVDEV_BUFSIZE * 2 + 2];
+static WORD g_dma_srate =  0;
+static int  g_dma_16bit =  0;
+static int  g_dma_mode  =  0;
+static int  g_dma_flag  =  0;
 static char g_irq_sem[FFKOBJ_SIZE];
+static DSP  g_dsp_dev   = {0};
 static void interrupt (*old_dsp_int_handler)(void) = NULL;
 
 /* 内部函数实现 */
 static void interrupt new_dsp_int_handler(void)
 {
-    disable();
-    dspintdone(&g_dsp_dev);
+    dsp_int_done(&g_dsp_dev, g_dma_16bit);
     outportb(0x20, 0x20);
+    disable();
     if (sem_post_interrupt(g_irq_sem) == 1) {
         INT_TASK_SWITCH();
     }
@@ -323,56 +241,59 @@ static void interrupt new_dsp_int_handler(void)
 }
 
 /* 函数实现 */
-void wavdev_init(int samprate)
+void wavdev_init(int channels, unsigned samprate, int sampsize)
 {
     /* create irq sem */
     sem_create(g_irq_sem, 2, 2);
 
     /* init dsp */
-    initdsp(&g_dsp_dev);
-    dspsetsamplerate(&g_dsp_dev, samprate);
-    dspsetblocksize (&g_dsp_dev, WAVDEV_BUFSIZE);
+    dsp_init(&g_dsp_dev);
+    if (g_dsp_dev.version <= 0x201) {
+        channels = 1;
+        sampsize = 8;
+    }
+    g_dma_srate = samprate;
+    g_dma_16bit = sampsize == 16;
+    g_dma_mode  = channels == 2  ? MODE_STEREO : 0;
+    g_dma_mode |= sampsize == 16 ? MODE_SIGNED : 0;
 
-    /* init dma */
-    initdma8bit(g_dsp_dev.dspdma8, g_dma_buf, WAVDEV_BUFSIZE * 2);
+    /* init 8237 dmac */
+    memset(g_dma_buf, g_dma_16bit ? 0 : 0x80, sizeof(g_dma_buf));
+    dmac_8237_init(g_dma_16bit ? g_dsp_dev.ch_dma16 : g_dsp_dev.ch_dma8, g_dma_16bit, g_dma_buf, WAVDEV_BUFSIZE * 2 >> g_dma_16bit);
 
     /* unmask dsp irq */
-    outportb(0x21, inportb(0x21) & ~(1 << g_dsp_dev.dspirqnum));
+    outportb(0x21, inportb(0x21) & ~(1 << g_dsp_dev.irq_num));
 
     /* install irq handler */
-    old_dsp_int_handler = getvect(g_dsp_dev.dspirqnum + 8);
-    setvect(g_dsp_dev.dspirqnum + 8, new_dsp_int_handler);
+    old_dsp_int_handler = getvect(g_dsp_dev.irq_num + 8);
+    setvect(g_dsp_dev.irq_num + 8, new_dsp_int_handler);
+
+    dsp_dma_init (&g_dsp_dev, WAVDEV_BUFSIZE >> g_dma_16bit, g_dma_srate, g_dma_16bit, g_dma_mode);
+    dsp_dma_pause(&g_dsp_dev, g_dma_16bit, 1);
 }
 
 void wavdev_exit(void)
 {
-    /* force stop */
-    wavdev_stop();
-
     /* restore irq handler */
-    setvect(g_dsp_dev.dspirqnum + 8, old_dsp_int_handler);
+    setvect(g_dsp_dev.irq_num + 8, old_dsp_int_handler);
 
     /* mask dsp irq */
-    outportb(0x21, inportb(0x21) | (1 << g_dsp_dev.dspirqnum));
+    outportb(0x21, inportb(0x21) | (1 << g_dsp_dev.irq_num));
 
     /* close dma */
-    closedma8bit(g_dsp_dev.dspdma8);
+    dmac_8237_close(g_dma_16bit ? g_dsp_dev.ch_dma16 : g_dsp_dev.ch_dma8, g_dma_16bit);
 
     /* close dsp */
-    closedsp(&g_dsp_dev);
+    dsp_dma_close(&g_dsp_dev, g_dma_16bit);
+    dsp_close(&g_dsp_dev);
 
     /* destroy irq sem*/
     sem_destroy(g_irq_sem);
 }
 
-void wavdev_start(void)
+void wavdev_play(int play)
 {
-    dspstartdma8bit(&g_dsp_dev);
-}
-
-void wavdev_stop(void)
-{
-    dsppausedma8bit(&g_dsp_dev);
+    dsp_dma_pause(&g_dsp_dev, g_dma_16bit, !play);
 }
 
 int wavdev_write(char *buf, int size)
@@ -399,14 +320,11 @@ static int far play_task_proc(void far *p)
     static char buf[WAVDEV_BUFSIZE];
     FILE *fp = fopen((char*)p, "rb");
     if (fp) {
-        while (!feof(fp)) {
-            int ret = fread(buf, 1, WAVDEV_BUFSIZE, fp);
-            if (ret > 0) {
-                if (ret < WAVDEV_BUFSIZE) {
-                    memset(buf + ret, 0, WAVDEV_BUFSIZE - ret);
-                }
-                wavdev_write(buf, WAVDEV_BUFSIZE);
-            }
+        while (1) {
+            int ret;
+            ret = fread(buf, 1, WAVDEV_BUFSIZE, fp);
+            if (ret > 0) wavdev_write(buf, ret);
+            else break;
         }
         fclose(fp);
     }
@@ -416,13 +334,14 @@ static int far play_task_proc(void far *p)
 void main(void)
 {
     ffkernel_init();
-    wavdev_init(16000);
-    wavdev_start();
+    wavdev_init(1, 16000, 8);
 
     task_create(play_task_proc, "test.wav", play_task_ctxt, sizeof(play_task_ctxt));
+    wavdev_play(1);
     task_wait(play_task_ctxt, -1);
+    wavdev_play(0);
+    task_destroy(play_task_ctxt);
 
-    wavdev_stop();
     wavdev_exit();
     ffkernel_exit();
 }
