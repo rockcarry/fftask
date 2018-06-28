@@ -1,6 +1,7 @@
 /* 包含头文件 */
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <dos.h>
 #include "fftask.h"
 

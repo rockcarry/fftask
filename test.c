@@ -1,6 +1,7 @@
 /* 包含头文件 */
 #include <stdlib.h>
 #include <stdio.h>
+#include <conio.h>
 #include "fftask.h"
 
 static char g_dos_mutex[FFKOBJ_SIZE];
@@ -32,7 +33,7 @@ static int far task2(void far *p)
         mutex_unlock(g_dos_mutex);
         task_sleep(200);
     }
-    return 54321;
+    return 24321;
 }
 
 static int far task3(void far *p)

@@ -36,7 +36,7 @@ static BYTE DMAC_ACP_PORT_TAB[][3] = {
 };
 
 /* 内部函数实现 */
-static int dmac_8237_init(int ch, int dma16, char far *addr, int size)
+static void dmac_8237_init(int ch, int dma16, char far *addr, int size)
 {
     DWORD phyaddr = (FP_SEG(addr) * 0x10L + FP_OFF(addr)) >> dma16;
     BYTE  page    = (BYTE)(phyaddr >> 16);
