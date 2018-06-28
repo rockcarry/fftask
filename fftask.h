@@ -24,7 +24,6 @@ typedef struct tagTASKCTRLBLK {
     int t_retv;    /* 任务返回值 */
     int t_ss;      /* 任务堆栈 ss */
     int t_sp;      /* 任务堆栈 sp */
-    int t_stack[0];/* 任务堆栈 */
 } TASKCTRLBLK;     /* 任务控制块 */
 
 /* 内核对象类型定义 */

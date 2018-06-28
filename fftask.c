@@ -341,7 +341,7 @@ int task_create(TASK taskfunc, void far *taskparam, void *ctask, int size)
     memset(ptask, 0, sizeof(TASKCTRLBLK));
 
     /* 指向任务栈顶 */
-    stack = (int*)((char*)ptask->t_stack + size - sizeof(TASKCTRLBLK));
+    stack = (int*)((char*)ptask + size);
 
     /* 任务控制块地址入栈 */
     *--stack = FP_SEG(ptask);
