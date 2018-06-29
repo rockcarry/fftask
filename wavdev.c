@@ -11,7 +11,7 @@ typedef unsigned short WORD;
 typedef unsigned long  DWORD;
 
 /*
-  DMA
+  DMAC
  */
 /* 内部常量定义 */
 /* 以下是 PC 机的 DMA 控制器端口的常量定义 */
@@ -144,25 +144,6 @@ static void dsp_close(DSP *dsp)
     resetdsp(dsp);
 }
 
-#if 0
-static void printdspinfo(DSP *dsp)
-{
-    printf("envstr:      %s\r\n", dsp->envstr     );
-    printf("version:     %x\r\n", dsp->version    );
-    printf("port_base:   %x\r\n", dsp->port_base  );
-    printf("port_reset:  %x\r\n", dsp->port_reset );
-    printf("port_read:   %x\r\n", dsp->port_read  );
-    printf("port_write:  %x\r\n", dsp->port_write );
-    printf("port_status: %x\r\n", dsp->port_status);
-    printf("port_ack16:  %x\r\n", dsp->port_ack16 );
-    printf("port_mixer:  %x\r\n", dsp->port_mixer );
-    printf("port_mpu401: %x\r\n", dsp->port_mpu401);
-    printf("irq_num:     %x\r\n", dsp->irq_num    );
-    printf("ch_dma8:     %x\r\n", dsp->ch_dma8    );
-    printf("ch_dma16:    %x\r\n", dsp->ch_dma16   );
-}
-#endif
-
 static void dsp_int_done(DSP *dsp, int dma16)
 {
     inportb(dma16 ? dsp->port_ack16 : dsp->port_status);
@@ -213,7 +194,6 @@ static void dsp_dma_pause(DSP *dsp, int dma16, int pause)
         }
     }
 }
-
 
 /*
   wavdev
@@ -303,8 +283,7 @@ int wavdev_write(char *buf, int size)
         ret = sem_wait(g_irq_sem, -1);
         if (ret == 0) {
             char far *p = g_dma_buf + g_dma_flag++ * WAVDEV_BUFSIZE;
-            int n = WAVDEV_BUFSIZE;
-            if (n > size) n = size;
+            int n = size < WAVDEV_BUFSIZE ? size : WAVDEV_BUFSIZE;
             do { *p++ = *buf++; size--; } while (n--);
             g_dma_flag %= 2;
         }
@@ -321,8 +300,7 @@ static int far play_task_proc(void far *p)
     FILE *fp = fopen((char*)p, "rb");
     if (fp) {
         while (1) {
-            int ret;
-            ret = fread(buf, 1, WAVDEV_BUFSIZE, fp);
+            int ret = fread(buf, 1, WAVDEV_BUFSIZE, fp);
             if (ret > 0) wavdev_write(buf, ret);
             else break;
         }
