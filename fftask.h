@@ -56,6 +56,7 @@ int  task_destroy (void *ctask);
 int  task_suspend (void *ctask);
 int  task_resume  (void *ctask);
 int  task_sleep   (int ms);
+int  task_delay   (int ms);
 int  task_wait    (void *ctask, int timeout);
 int  task_exitcode(void *ctask, int *code);
 

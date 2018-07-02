@@ -481,6 +481,20 @@ int task_sleep(int ms)
     return 0;
 }
 
+int task_delay(int ms)
+{
+    long tick = g_tick_counter + (ms + 9) / 10;
+    while (g_tick_counter < tick) {
+        /* 释放处理器资源 */
+#if FOR_REAL_DOS
+        asm hlt;
+#else
+        asm mov ax, 0x1680;
+        asm int 0x2f;
+#endif
+    }
+}
+
 int task_wait(void *ctask, int timeout)
 {
     TASKCTRLBLK *ptask = (TASKCTRLBLK*)ctask;
