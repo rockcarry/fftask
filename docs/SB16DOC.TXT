@@ -1,0 +1,438 @@
+                 ษอออออออออออออออออออออออออออออออออออออป
+                 บ Programming the SoundBlaster 16 DSP บ
+                 บ      Written by Ethan Brodsky       บ
+                 บ     (ericbrodsky@psl.wisc.edu)      บ
+                 บ            Version 3.3              บ
+                 บ              5/18/96                บ
+                 ศอออออออออออออออออออออออออออออออออออออผ
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Disclaimer ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤู
+
+This information is distributed AS IS.  The author specifically disclaims
+responsibility for any loss of profit or any consequential, incidental,
+or other damages resulting from the use or misuse of this information.
+This information may be freely distributed in any form as long as this
+disclaimer remains intact.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Introduction ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+The Sound Blaster 16 is capable of both FM and digitized sounds.  Digitized
+sound capibilities range from 8-bit mono 5000 HZ sound all the way up to
+16-bit stereo sound at 44khz.  This FAQ documents programming the SB16 DSP
+CT1341 chip for recording and playback of digitized audio.  Prior knowledge
+on programming earlier Sound Blaster sound cards is necessary.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ The Sound Blaster 16 DSP I/O Ports ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+The SB16's DSP chip is programming using several I/O ports at a base I/O
+address determined by jumper settings.  On the SB16, there are 16 I/O ports
+which are used for FM synthesized music, mixer settings, DSP programming and
+CD-ROM access.  Five of these ports are used in programming the DSP.  They
+are listed below.
+
+  2x6h - DSP Reset
+  2xAh - DSP Read
+  2xCh - DSP Write (Command/Data), DSP write-buffer status (Bit 7)
+  2xEh - DSP Read-buffer status (Bit 7), DSP interrupt acknowledge
+  2xFh - DSP 16-bit interrupt acknowledge
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Resetting the DSP ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+You have to reset the DSP before you can program it.  The DSP can be reset
+using the following procedure:
+  1)  Write a 1 to the reset port (2x6)
+  2)  Wait for 3 microseconds
+  3)  Write a 0 to the reset port (2x6)
+  4)  Poll the read-buffer status port (2xE) until bit 7 is set
+  5)  Poll the read data port (2xA) until you receive an AA
+
+The DSP usually takes about 100 microseconds to initialized itself.  After
+this period of time, if the return value is not AA or there is no data at
+all, then the SB card may not be installed or an incorrect I/O address is
+being used.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Writing to the DSP ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+To write a byte to the SB16, the following procedure should be used:
+  1)  Read the write-buffer status port (2xC) until bit 7 is cleared
+  2)  Write the value to the write port (2xC)
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Reading the DSP ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+To read a byte from the SB16, the following procedure should be used:
+  1)  Read the read-buffer status port (2xE) until bit 7 is set
+  2)  Read the value from the read port (2xA)
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Programming the DMA Controller ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+The DMA (Direct Memory Access) controller controls data transfers between
+I/O devices and memory without using the CPU.  An Intel 8237 DMAC integrated
+circut is used to control this.  An IBM compatible computer has two DMA
+controllers, one for 8-bit transfers and one for 16-bit transfers.  The DMA
+controller, coupled with an external page register, is capable of transfering
+blocks of up 64k to the SB16.  Here is information on I/O ports and register
+settings necessary for sound card I/O:
+
+ I/O port addresses for the DMA Address and Count Registers
+  ษออออออออออออัอออออออออออออัอออออออออออออออออออป
+  บ Controller ณ I/O address ณ     Function      บ
+  ฬออออออออออออุอออออออออออออุอออออออออออออออออออน
+  บ   DMA 1    ณ     00      ณ Channel 0 address บ
+  บ   8-bit    ณ     01      ณ Channel 0 count   บ
+  บ   Slave    ณ     02      ณ Channel 1 address บ
+  บ            ณ     03      ณ Channel 1 count   บ
+  บ            ณ     04      ณ Channel 2 address บ
+  บ            ณ     05      ณ Channel 2 count   บ
+  บ            ณ     06      ณ Channel 3 address บ
+  บ            ณ     07      ณ Channel 3 count   บ
+  ฬออออออออออออุอออออออออออออุอออออออออออออออออออน
+  บ   DMA 2    ณ     C0      ณ Channel 4 address บ
+  บ   16-bit   ณ     C2      ณ Channel 4 count   บ
+  บ   Master   ณ     C4      ณ Channel 5 address บ
+  บ            ณ     C6      ณ Channel 5 count   บ
+  บ            ณ     C8      ณ Channel 6 address บ
+  บ            ณ     CA      ณ Channel 6 count   บ
+  บ            ณ     CC      ณ Channel 7 address บ
+  บ            ณ     CE      ณ Channel 7 count   บ
+  ศออออออออออออฯอออออออออออออฯอออออออออออออออออออผ
+
+ I/O port addresses for the control registers
+  ษอออออออออออออัอออออออออออัออออออออออออออออออออออออออออออป
+  บ   Address   ณ Operation ณ           Function           บ
+  บ DMAC1 DMAC2 ณ           ณ                              บ
+  ฬอออออออออออออุอออออออออออุออออออออออออออออออออออออออออออน
+  บ  0A    D4   ณ   Write   ณ Write single mask register   บ
+  บ  0B    D6   ณ   Write   ณ Write mode register          บ
+  บ  0C    D8   ณ   Write   ณ Clear byte pointer flip-flop บ
+  ศอออออออออออออฯอออออออออออฯออออออออออออออออออออออออออออออผ
+
+ I/O port addresses for lower page registers
+  ษอออออออออัออออออออออออออออออออออออออออป
+  บ Address ณ  Function                  บ
+  ฬอออออออออุออออออออออออออออออออออออออออน
+  บ   81    ณ  8-bit DMA channel 2 page  บ
+  บ   82    ณ  8-bit DMA channel 3 page  บ
+  บ   83    ณ  8-bit DMA channel 1 page  บ
+  บ   87    ณ  8-bit DMA channel 0 page  บ
+  บ   89    ณ  16-bit DMA channel 6 page บ
+  บ   8A    ณ  16-bit DMA channel 7 page บ
+  บ   8B    ณ  16-bit DMA channel 5 page บ
+  ศอออออออออฯออออออออออออออออออออออออออออผ
+
+ Mode register bit assignments
+  ษอออออออออออัอออออออออออออออออออออออออออออออออป
+  บ Bit/Value ณ Function                        บ
+  ฬอออออออออออุอออออออออออออออออออออออออออออออออน
+  บ Bits 7:6  ณ Mode selection bits             บ
+  บ    00     ณ  Demand mode selected           บ
+  บ    01     ณ  Single mode selected           บ
+  บ    10     ณ  Block mode selected            บ
+  บ    11     ณ  Cascade mode selected          บ
+  ฬอออออออออออุอออออออออออออออออออออออออออออออออน
+  บ   Bit 5   ณ Address increment/decrement bit บ
+  บ     1     ณ  Address decrement selected     บ
+  บ     0     ณ  Address increment selected     บ
+  ฬอออออออออออุอออออออออออออออออออออออออออออออออน
+  บ   Bit 4   ณ Auto-initialization enable bit  บ
+  บ     1     ณ  Auto-initialized DMA selected  บ
+  บ     0     ณ  Single-cycle DMA selected      บ
+  ฬอออออออออออุอออออออออออออออออออออออออออออออออน
+  บ Bits 3:2  ณ Transfer bits                   บ
+  บ    00     ณ  Verify transfer                บ
+  บ    01     ณ  Write transfer (To memory)     บ
+  บ    10     ณ  Read transfer (From memory)    บ
+  บ    11     ณ  Illegal                        บ
+  บ    **     ณ  Ignored if bits 7:6 = 11       บ
+  ฬอออออออออออุอออออออออออออออออออออออออออออออออน
+  บ Bits 1:0  ณ Channel selection bits          บ
+  บ    00     ณ  Select channel 0 (4)           บ
+  บ    01     ณ  Select channel 1 (5)           บ
+  บ    10     ณ  Select channel 2 (6)           บ
+  บ    11     ณ  Select channel 3 (7)           บ
+  ศอออออออออออฯอออออออออออออออออออออออออออออออออผ
+
+ Write single mask bit assignments
+  ษอออออออออออัออออออออออออออออออออออออออออออออออป
+  บ Bit/Value ณ Function                         บ
+  ฬอออออออออออุออออออออออออออออออออออออออออออออออน
+  บ Bits 7:3  ณ Unused (Set to 0)                บ
+  ฬอออออออออออุออออออออออออออออออออออออออออออออออน
+  บ   Bit 2   ณ Set/clear mask bit               บ
+  บ     1     ณ  Set mask bit (Disable channel)  บ
+  บ     0     ณ  Clear mask bit (Enable channel) บ
+  ฬอออออออออออุออออออออออออออออออออออออออออออออออน
+  บ Bits 1:0  ณ Channel selection bits           บ
+  บ    00     ณ  Select channel 0 (4)            บ
+  บ    01     ณ  Select channel 1 (5)            บ
+  บ    10     ณ  Select channel 2 (6)            บ
+  บ    11     ณ  Select channel 3 (7)            บ
+  ศอออออออออออฯออออออออออออออออออออออออออออออออออผ
+
+DMAC2 is used for 16-bit I/O and DMAC1 is used for 8-bit I/O.  The procedure
+for starting a transfer is complicated, so I'll list the steps for starting
+the type of DMA transfers used for sound I/O:
+
+  1)  Calculate the absolute linear address of your buffer
+        LinearAddr := Seg(Ptr^)*16 + Ofs(Ptr^));
+
+  2)  Disable the sound card DMA channel by setting the appropriate mask bit
+        Port[MaskPort] := 4 + (Channel mod 4);
+
+  3)  Clear the byte pointer flip-flop
+        Port[ClrBytePtr] := AnyValue;
+
+  4)  Write the DMA mode for the transfer
+      The mode selection bits should be set to 01 for single-mode.  The
+      address inc/dec bit should be set to 0 for address increment.  The
+      auto-initialization bit should be set appropriately.  I will discuss
+      auto-initialized DMA later.  The transfer bits should be set to 10
+      for playback and 01 for recording.  The channel select should be
+      set to the sound card DMA channel.  Be aware that "read" means a read
+      from memory (Write to sound card) and that "write" means a write to
+      system memory (Read from sound card)
+        Port[ModePort] := Mode + (Channel mod 4);
+      Some often used modes are:
+        48h+Channel - Single-cycle playback
+        58h+Channel - Auto-initialized playback
+        44h+Channel - Single-cycle recording
+        54h+Channel - Auto-initialized recording
+
+  5)  Write the offset of the buffer, low byte followed by high byte.  For
+      sixteen bit data, the offset should be in words from the start of a
+      128kbyte page. The easiest method for computing 16-bit parameters is
+      to divide the linear address by two before calculating offset.
+        if SixteenBit
+          then
+            begin
+              BufOffset := (LinearAddr div 2) mod 65536;
+              Port[BaseAddrPort] := Lo(BufOffset);
+              Port[BaseAddrPort] := Hi(BufOffset);
+            end
+          else
+            begin
+              BufOffset := LinearAddr mod 65536;
+              Port[BaseAddrPort] := Lo(BufOffset);
+              Port[BaseAddrPort] := Hi(BufOffset);
+            end;
+
+  6)  Write the transfer length, low byte followed by high byte.  For an
+      8-bit transfer, write the number of bytes-1.  For a 16-bit transfer,
+      write the number of words-1.
+        Port[CountPort] := Lo(TransferLength-1);
+        Port[CountPort] := Hi(TransferLength-1);
+
+  7)  Write the buffer page to the DMA page register.
+        Port[PagePort] := LinearAddr div 65536;
+
+  8)  Enable the sound card DMA channel by clearing the appropriate mask bit
+      Port[MaskPort] := DMAChannel mod 4;
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Setting the sampling rate ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+Unlike earlier Sound Blasters, the SB16 is programmed with actual sampling
+rates instead of time constants.  On the SB16, the sampling rate is set
+using DSP commands 41h and 42h.  Command 41h is used for output and 42h is
+used for input.  I have heard that on the SB16, both these command currently
+do the same thing, but I would recommend using the individual commands to
+guarantee compatibility with future sound cards.  The procedure for setting
+the sampling rate is:
+  1)  Write the command (41h for output rate, 42h for input rate)
+  2)  Write the high byte of the sampling rate (56h for 22050 hz)
+  3)  Write the low byte of the sampling rate  (22h for 22050 hz)
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Digitized sound I/O ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+To record or play back sound, you should use the following sequence:
+
+  1)  Allocate a buffer that does not cross a 64k physical page boundary
+  2)  Install an interrupt service routine
+  3)  Program the DMA controller for background transfer
+  4)  Set the sampling rate
+  5)  Write the I/O command to the DSP
+  6)  Write the I/O transfer mode to the DSP
+  7)  Write the block size to the DSP (Low byte/High byte)
+
+Upon interrupt when using single-cycle DMA:
+  1)  Program DMA controller for next block
+  2)  Program DSP for next block
+  3)  Copy next block if double-buffering
+  4)  Acknowledge the interrupt with the SB by reading from port 2xE for
+      8-bit sound or port 2xF for 16-bit sound.
+  5)  Acknowledge the end of interrupt with the PIC by writing 20h to port
+      20h. If the sound card is on IRQ8-15, you must also write 20h to A0h.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ DSP commands ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+ D0 - Pause 8-bit DMA mode digitized sound I/O initiated by command Cxh.
+      Applicable to both single-cycle and auto-initialized DMA I/O.
+ D4 - Continue 8-bit DMA mode digitized sound I/O paused using command D0.
+      Applicable to both single-cycle and auto-initialzied DMA I/O.
+
+ D5 - Pause 16-bit DMA mode digitized sound I/O initiated by command Bxh.
+      Applicable to both single-cycle and auto-initialized DMA I/O.
+ D6 - Continue 16-bit DMA mode digitized sound I/O paused using command D5
+      Applicable to both single-cycle and auto-initialized DMA I/O.
+
+ D9 - Exit 16-bit auto-initialized DMA mode digitized sound I/O after the
+      end of the current block.
+ DA - Exit 8-bit auto-initialized DMA mode digitized sound I/O after the
+      end of the current block.
+
+ E1 - Get DSP version number.  After sending this command, read back two
+      bytes form the DSP.  The first byte is the major version number and
+      the second byte is the minor version number.  A SB16 should have a
+      DSP version of 4.00 or greater.  Check this before using an SB16
+      specific commands.
+
+ Bx - Program 16-bit DMA mode digitized sound I/O
+      Command sequence:  Command, Mode, Lo(Length-1), Hi(Length-1)
+       Command:
+        ษออออัออออัออออัออออัอออออออัออออออัอออออออัออออป
+        บ D7 ณ D6 ณ D5 ณ D4 ณ  D3   ณ  D2  ณ  D1   ณ D0 บ
+        ฬออออุออออุออออุออออุอออออออุออออออุอออออออุออออน
+        บ  1 ณ  0 ณ  1 ณ  1 ณ  A/D  ณ  A/I ณ FIFO  ณ  0 บ
+        ศออออฯออออฯออออฯออออลฤฤฤฤฤฤฤลฤฤฤฤฤฤลฤฤฤฤฤฤฤลออออผ
+                            ณ 0=D/A ณ 0=SC ณ 0=off ณ
+                            ณ 1=A/D ณ 1=AI ณ 1=on  ณ
+                            ภฤฤฤฤฤฤฤมฤฤฤฤฤฤมฤฤฤฤฤฤฤู
+       Common commands:
+         B8 - 16-bit single-cycle input
+         B0 - 16-bit single-cycle output
+         BE - 16-bit auto-initialized input
+         B6 - 16-bit auto-initialized output
+
+       Mode:
+        ษออออัออออัออออออออออัออออออออออออัออออัออออัออออัออออป
+        บ D7 ณ D6 ณ    D5    ณ     D4     ณ D3 ณ D2 ณ D1 ณ D0 บ
+        ฬออออุออออุออออออออออุออออออออออออุออออุออออุออออุออออน
+        บ  0 ณ  0 ณ  Stereo  ณ   Signed   ณ  0 ณ  0 ณ  0 ณ  0 บ
+        ศออออฯออออลฤฤฤฤฤฤฤฤฤฤลฤฤฤฤฤฤฤฤฤฤฤฤลออออฯออออฯออออฯออออผ
+                  ณ 0=Mono   ณ 0=unsigned ณ
+                  ณ 1=Stereo ณ 1=signed   ณ
+                  ภฤฤฤฤฤฤฤฤฤฤมฤฤฤฤฤฤฤฤฤฤฤฤู
+
+ Cx - Program 8-bit DMA mode digitized sound I/O
+      Same procedure as 16-bit sound I/O using command Bx
+       Common commands:
+         C8 - 8-bit single-cycle input
+         C0 - 8-bit single-cycle output
+         CE - 8-bit auto-initialized input
+         C6 - 8-bit auto-initialized output
+
+The FIFO is used to eliminate inconsistencies in the sample period
+when the sound card is not able to get DMA when it needs it.  With
+FIFO disabled, the card attempts DMA at precisely the instant that
+it needs a sample.  If another device with a higher priority is
+accessing DMA, the sound card waits for the sample and the sampling
+rate may be decreased.  The FIFO allows the DMA sample period to be
+more erratic without affecting the audio quality.  The FIFO is cleared
+whenever a command is sent to the DSP.  In Single-cycle mode, the DSP
+is constantly being reprogrammed.  The FIFO may still contain data which
+has not been output when it cleared.  To avoid this problem, the FIFO
+should be turned off for single-cycle mode.  When in auto-initialized
+mode, the DSP is never reprogrammed.  The FIFO can be left on and sound
+quality will be improved.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ Auto-initialized DMA ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤู
+
+When single-cycle DMA is used, sound output stops at the end of each block.
+The interrupt handler can start another transfer, but there will be a break
+in output.  This causes a click between each block, reducing sound quality.
+When auto-initialized DMA is used, sound output loops around at the end of
+the buffer.  The DMA controller keeps transfering the same block of memory
+that the DMA transfer was initiated with.  When the end of the buffer is
+reached, it will start sending the buffer again by auto-initializing the
+current offset and count registers with the values stored in the base offset
+and count registers.  The usual method for achieving click-less output is to
+allocate a buffer and divide it into two blocks.  Program the DMA controller
+with the length of the whole buffer, but program the SB16 with the length of
+a block. (Half of the buffer)  An interrupt occurs for each sound card block,
+so two interrupts will occur each time the buffer is played, once at the
+midpoint (Start of the second block) and once at the end (In effect, the
+start of the first block)  The interrupt handler should copy data into the
+block that was just finished so that the data is ready when it is needed for
+output.  The programming procedure for an auto-initialized DMA transfer is
+identical to the procedure for a single-cycle DMA transfer, except that bit
+4 of the DMA mode register and bit 3 of the DSP command are set.
+
+Upon interrupt when using auto-initialized DMA:
+  1)  Copy next chunk into output buffer block that just finished
+  2)  Acknowledge the interrupt with the SB by reading from port 2xE for
+      8-bit sound or port 2xF for 16-bit sound.
+  3)  Acknowledge the end of interrupt with the PIC by writing 20h to port
+      20h. If the sound card is on IRQ8-15, you must also write 20h to A0h.
+
+To stop sound immediately:
+  8-bit  - Write DSP command D0h (Pause 8-bit DMA mode digitized sound I/O)
+  16-bit - Write DSP command D5h (Pause 16-bit DMA mode digitized sound I/O)
+  (Stops sound immediately, without an interrupt)
+
+To stop the sound at the end of the currently block:
+  8-bit  - Write DSP command DAh (Stop 8-bit auto-init DMA sound I/O)
+  16-bit - Write DSP command D9h (Stop 16-bit auto-init DMA sound I/O)
+  (These two commands will stop the sound at the end of the current
+  block.  If your program is not prepared for an interrupt after output
+  is finished, it may cause problems)
+
+You can also end auto-initialized mode by reprogramming the DSP for
+single-cycle mode.  The card then switches from A/I mode to S/C mode after
+the next interrupt.  It will then contiue to play or record for the length
+specified, generate an interrupt and stop.  This will allow you to stop
+output exactly at the end of the data, without requiring the remainder of
+the DMA buffer to be filled with silence.  This technique may or may not
+be useful to you.  I would recommend using the pause commands documented
+in in the immediate stop section unless another method is more suited to
+your purpose.
+
+ฺฤฤฤฤฤฤฤฤฤฤฤฤยฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤฤ
+ณ References ณ
+ภฤฤฤฤฤฤฤฤฤฤฤฤู
+
+ Title:         Developer Kit for the Sound Blaster Series, Second Edition.
+ Publishers:    Creative Technology Ltd.
+
+ Title:         Intel 486 Microcomputer Model 401 Board Technical Ref. Manual
+ Publisher:     Intel Corporation
+ Order-number:  504366-002
+
+ Title:         8237A High Performance Programmable DMA Controller specs
+ Publisher:     Intel Corporation
+ Order-number:  231466-005
+
+ Title:         8259A Programmable Interrupt Controller specs
+ Publisher:     Intel Corporation
+ Order-number:  231468-003
+
+ Title:         SMIX Sound System
+ Author:        Ethan Brodsky
+ Location:      x2ftp.oulu.fi /pub/msdos/programming/mxlibs/smix*.zip
+                (May be moved to another directory)
+
+ Title:         SB16SND code
+ Author:        Ethan Brodsky
+ Location:      http://www.xraylith.wisc.edu/~ebrodsky/other/sb16snd.zip
+
+Thanks to Douglas Kaden at Creative Labs for information on 16-bit DMA, 
+FIFO mode, and numerous other topics.
